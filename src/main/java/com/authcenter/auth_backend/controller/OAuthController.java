@@ -22,8 +22,11 @@ public class OAuthController {
     private final UserRepository userRepository;
     private final JwtService jwtService;
 
-    @Value("${jwt.expiration.ms:86400000}") // 1 day
-    private long jwtExpirationMs;
+    @Value("${jwt.access.expiration.ms:900000}")
+    private long jwtAccessExpirationMs;
+
+    @Value("${jwt.refresh.expiration.ms:604800000}")
+    private long jwtRefreshExpirationMs;
 
     public OAuthController(UserRepository userRepository, JwtService jwtService) {
         this.userRepository = userRepository;
@@ -31,19 +34,18 @@ public class OAuthController {
     }
 
     @GetMapping("/oauth2/success")
-    public ResponseEntity<?> oauth2Success(OAuth2AuthenticationToken authentication, HttpServletResponse response) {
+    public ResponseEntity<?> oauth2Success(String redirect, OAuth2AuthenticationToken authentication, HttpServletResponse response) {
         Map<String, Object> attributes = authentication.getPrincipal().getAttributes();
 
         String email = (String) attributes.get("email");
         String name = (String) attributes.getOrDefault("name", email.split("@")[0]);
-        String domain = email.split("@")[1];
 
         User user = userRepository.findByEmail(email)
                 .orElseGet(() -> {
                     User newUser = new User();
                     newUser.setEmail(email);
                     newUser.setName(name);
-                    newUser.setDomain(domain);
+                    newUser.setApplication(redirect);
                     newUser.setRole("user");
                     newUser.setApproved(true); // Assume approved
                     return userRepository.save(newUser);
@@ -55,17 +57,29 @@ public class OAuthController {
         claims.put("name", user.getName());
         claims.put("email", user.getEmail());
         claims.put("role", user.getRole());
-        claims.put("domain", user.getDomain());
+        claims.put("domain", user.getApplication());
 
-        String token = jwtService.generateToken(claims, user.getEmail(), jwtExpirationMs);
+        // Generate access and refresh tokens
+        String accessToken = jwtService.generateAccessToken(claims, user.getEmail(), jwtAccessExpirationMs);
+        String refreshToken = jwtService.generateRefreshToken(user.getEmail(), jwtRefreshExpirationMs);
 
-        Cookie cookie = new Cookie("auth_token", token);
-        cookie.setHttpOnly(true);
-        cookie.setSecure(true);
-        cookie.setPath("/");
-        cookie.setMaxAge((int) Duration.ofMillis(jwtExpirationMs).getSeconds());
-        cookie.setDomain("local.authcenter.com"); // adjust in production
-        response.addCookie(cookie);
+        // Set access token in cookie
+        Cookie accessCookie = new Cookie("auth_token", accessToken);
+        accessCookie.setHttpOnly(true);
+        accessCookie.setSecure(false); // true in production with HTTPS
+        accessCookie.setPath("/");
+        accessCookie.setDomain(".madhusudan.space");
+        accessCookie.setMaxAge((int) Duration.ofMillis(jwtAccessExpirationMs).getSeconds());
+        response.addCookie(accessCookie);
+
+        // Set refresh token in cookie
+        Cookie refreshCookie = new Cookie("refresh_token", refreshToken);
+        refreshCookie.setHttpOnly(true);
+        refreshCookie.setSecure(false); // true in production
+        refreshCookie.setPath("/");
+        refreshCookie.setDomain(".madhusudan.space");
+        refreshCookie.setMaxAge((int) Duration.ofMillis(jwtRefreshExpirationMs).getSeconds());
+        response.addCookie(refreshCookie);
 
         return ResponseEntity.ok(new ApiResponse<>("OAuth2 login successful", null, 200));
     }

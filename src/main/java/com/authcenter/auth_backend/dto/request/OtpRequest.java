@@ -2,6 +2,7 @@ package com.authcenter.auth_backend.dto.request;
 
 public class OtpRequest {
     private String email;
+    private String otpRequiredFor;
     private String captchaToken;
 
     public String getEmail() {
@@ -10,6 +11,14 @@ public class OtpRequest {
 
     public void setEmail(String email) {
         this.email = email;
+    }
+
+    public String getOtpRequiredFor() {
+        return otpRequiredFor;
+    }
+
+    public void setOtpRequiredFor(String otpRequiredFor) {
+        this.otpRequiredFor = otpRequiredFor;
     }
 
     public String getCaptchaToken() {

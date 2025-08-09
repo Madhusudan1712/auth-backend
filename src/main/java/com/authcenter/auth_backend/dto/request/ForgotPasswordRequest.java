@@ -5,6 +5,7 @@ public class ForgotPasswordRequest {
     private String newPassword;
     private String otp;
     private String captchaToken;
+    private String redirect;
 
     public String getEmail() {
         return email;
@@ -36,6 +37,14 @@ public class ForgotPasswordRequest {
 
     public void setCaptchaToken(String captchaToken) {
         this.captchaToken = captchaToken;
+    }
+
+    public String getRedirect() {
+        return redirect;
+    }
+
+    public void setRedirect(String redirect) {
+        this.redirect = redirect;
     }
 }
 
