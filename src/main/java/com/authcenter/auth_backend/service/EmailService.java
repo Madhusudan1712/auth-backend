@@ -2,48 +2,262 @@ package com.authcenter.auth_backend.service;
 
 import jakarta.mail.MessagingException;
 import jakarta.mail.internet.MimeMessage;
-import org.springframework.beans.factory.annotation.Autowired;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.stereotype.Service;
 
+import java.io.UnsupportedEncodingException;
+import java.net.URI;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
+import java.time.Year;
+import java.util.Objects;
+
 @Service
 public class EmailService {
 
-    @Autowired
-    private JavaMailSender mailSender;
+    private static final Logger log = LoggerFactory.getLogger(EmailService.class);
 
-    public void sendOtpEmail(String to, String otp) {
-        SimpleMailMessage msg = new SimpleMailMessage();
-        msg.setFrom("noreply@madhusudan.space");
-        msg.setTo(to);
-        msg.setSubject("Your OTP Code");
-        msg.setText("Your OTP is: " + otp);
-        mailSender.send(msg);
+    private final JavaMailSender mailSender;
+
+    @Value("${authcenter.approval.link.base}")
+    private String approvalBase;
+
+    @Value("${mail.from.address:noreply@madhusudan.space}")
+    private String fromAddress;
+
+    @Value("${mail.from.name:AuthCenter}")
+    private String fromName;
+
+    @Value("${mail.replyto:admin@madhusudan.space}")
+    private String replyTo;
+
+    @Value("${mail.unsubscribe.url:}")
+    private String unsubscribeUrl;
+
+    public EmailService(JavaMailSender mailSender) {
+        this.mailSender = mailSender;
     }
 
-    public void sendApprovalRequest(String to, String encryptedUserId, String approvalString, String email, String role, String link) {
-        String subject = "Admin Approval Request";
-        String body = "<html><body>" +
-                "<h3>New Admin Account Request</h3>" +
-                "<p><strong>User ID:</strong> " + encryptedUserId + "</p>" +
-                "<p><strong>Email:</strong> " + email + "</p>" +
-                "<p><strong>Role:</strong> " + role + "</p>" +
-                "<p><strong>Approval Code:</strong> " + approvalString + "</p>" +
-                "<a href='" + link + "'>Take Action</a>" +
-                "</body></html>";
+    private String buildListUnsubscribeHeader() {
+        if (unsubscribeUrl != null && !unsubscribeUrl.isBlank() && unsubscribeUrl.startsWith("https://")) {
+            return "<" + unsubscribeUrl + ">, <mailto:" + fromAddress + "?subject=unsubscribe>";
+        } else {
+            String host = extractHostname(approvalBase);
+            return "<mailto:" + fromAddress + "?subject=unsubscribe>, <https://" + host + "/unsubscribe>";
+        }
+    }
+
+    private static String extractHostname(String url) {
+        if (url == null) return "madhusudan.space";
+        try {
+            URI uri = new URI(url);
+            String host = uri.getHost();
+            return host == null ? "madhusudan.space" : host;
+        } catch (Exception ex) {
+            return "madhusudan.space";
+        }
+    }
+
+    public void sendOtpEmail(String to, String otp, String otpRequiredFor) {
+        Objects.requireNonNull(to, "Recipient email required");
+        String subject = "Your AuthCenter OTP";
+
+        String plain = "Dear User," + System.lineSeparator() + System.lineSeparator() +
+                "Your requested otp for " + otpRequiredFor + System.lineSeparator() + System.lineSeparator() +
+                "OTP is: " + otp + System.lineSeparator() + System.lineSeparator() +
+                "Note: This OTP valid for 10 minutes ...!" + System.lineSeparator() + System.lineSeparator() +
+                "This is an auto-generated email. Do not reply to this email." + System.lineSeparator() + System.lineSeparator() +
+                "© " + Year.now().getValue() + " madhusudan.space — This message was sent on behalf of AuthCenter.";
 
         try {
             MimeMessage message = mailSender.createMimeMessage();
-            MimeMessageHelper helper = new MimeMessageHelper(message, true);
+            MimeMessageHelper helper = new MimeMessageHelper(message, false, "UTF-8");
+
+            helper.setFrom(fromAddress, fromName);
             helper.setTo(to);
             helper.setSubject(subject);
-            helper.setText(body, true);
+            helper.setText(plain); // plain text only
+            helper.setReplyTo(replyTo);
+
+            // Simple delivery-helpful headers
+            message.addHeader("List-Unsubscribe", buildListUnsubscribeHeader());
+            message.addHeader("X-Mailer", "AuthCenter Mailer");
+
             mailSender.send(message);
-        } catch (MessagingException e) {
-            e.printStackTrace();
+            log.info("OTP email sent to {}", to);
+        } catch (MessagingException | UnsupportedEncodingException ex) {
+            log.error("Failed to send OTP email to {}: {}", to, ex.getMessage(), ex);
+        } catch (Exception ex) {
+            log.error("Unexpected error sending OTP to {}: {}", to, ex.getMessage(), ex);
         }
     }
+
+    public void sendRegistrationSuccess(String to, String domain){
+        Objects.requireNonNull(to, "Recipient email required");
+        String subject = "Registration success";
+
+        String plain = "Dear User," + System.lineSeparator() + System.lineSeparator() +
+                "Your registration is success ..!" + System.lineSeparator() + System.lineSeparator() +
+                "Please try to login with your email and password " + domain + System.lineSeparator() + System.lineSeparator() +
+                "This is an auto-generated email. Do not reply to this email." + System.lineSeparator() + System.lineSeparator() +
+                "© " + Year.now().getValue() + " madhusudan.space — This message was sent on behalf of AuthCenter.";
+
+        try {
+            MimeMessage message = mailSender.createMimeMessage();
+            MimeMessageHelper helper = new MimeMessageHelper(message, false, "UTF-8");
+
+            helper.setFrom(fromAddress, fromName);
+            helper.setTo(to);
+            helper.setSubject(subject);
+            helper.setText(plain); // plain text only
+            helper.setReplyTo(replyTo);
+
+            // Simple delivery-helpful headers
+            message.addHeader("List-Unsubscribe", buildListUnsubscribeHeader());
+            message.addHeader("X-Mailer", "AuthCenter Mailer");
+
+            mailSender.send(message);
+            log.info("Registration success email sent to {}", to);
+        } catch (MessagingException | UnsupportedEncodingException ex) {
+            log.error("Failed to send Registration success email to {}: {}", to, ex.getMessage(), ex);
+        } catch (Exception ex) {
+            log.error("Unexpected error sending Registration success to {}: {}", to, ex.getMessage(), ex);
+        }
+    }
+
+    public void sendApprovalRequest(String to,
+                                    String encryptedUserId,
+                                    String approvalString,
+                                    String userEmail,
+                                    String role) {
+
+        Objects.requireNonNull(to, "Recipient email required");
+
+        String subject = "Admin approval request — Review required";
+
+        if (approvalBase == null || approvalBase.isBlank()) {
+            log.error("approval.link.base is not configured. Please set authcenter.approval.link.base in application.properties");
+            return;
+        }
+        if (!approvalBase.startsWith("https://")) {
+            log.warn("approval.link.base is not HTTPS ({}). For best deliverability use https and avoid raw ports.", approvalBase);
+        }
+
+        try {
+            // Build action link (URL-encode params)
+            String encodedId = URLEncoder.encode(encryptedUserId == null ? "" : encryptedUserId, StandardCharsets.UTF_8);
+            String encodedApproval = URLEncoder.encode(approvalString == null ? "" : approvalString, StandardCharsets.UTF_8);
+            String actionLink = String.format("%s?userId=%s&approvalString=%s", approvalBase, encodedId, encodedApproval);
+
+            // Plain text body (matches your sample)
+            StringBuilder plain = new StringBuilder();
+            plain.append("Hello Madhusudan,").append(System.lineSeparator()).append(System.lineSeparator());
+            plain.append("A new administrator account request requires your review please approve or reject by verifying the account. Below are the details:").append(System.lineSeparator()).append(System.lineSeparator());
+            plain.append("User ID: \t").append(encryptedUserId).append(System.lineSeparator());
+            plain.append("Email :\t").append(userEmail).append(System.lineSeparator());
+            plain.append("Role :\t").append(role).append(System.lineSeparator());
+            plain.append("Approval code :\t").append(approvalString).append(System.lineSeparator()).append(System.lineSeparator());
+            plain.append("Take action (approve or reject):").append(System.lineSeparator());
+            plain.append(actionLink).append(System.lineSeparator()).append(System.lineSeparator());
+            plain.append("If you don't have access or believe this is in error, contact ").append(replyTo).append(".").append(System.lineSeparator()).append(System.lineSeparator());
+            plain.append("© ").append(Year.now().getValue()).append(" madhusudan.space — This message was sent on behalf of AuthCenter.");
+
+            String plainTextBody = plain.toString();
+
+            MimeMessage message = mailSender.createMimeMessage();
+            MimeMessageHelper helper = new MimeMessageHelper(message, false, "UTF-8");
+
+            helper.setFrom(fromAddress, fromName);
+            helper.setTo(to);
+            helper.setSubject(subject);
+            helper.setText(plainTextBody); // plain only
+            helper.setReplyTo(replyTo);
+
+            // Helpful headers
+            message.addHeader("List-Unsubscribe", buildListUnsubscribeHeader());
+            message.addHeader("X-Mailer", "AuthCenter Mailer");
+
+            mailSender.send(message);
+            log.info("Approval request email sent to {} for applicant {}", to, userEmail);
+
+        } catch (UnsupportedEncodingException e) {
+            log.error("Failed to encode URL parameters for approval link: {}", e.getMessage(), e);
+        } catch (MessagingException e) {
+            log.error("Failed to construct/send approval email to {}: {}", to, e.getMessage(), e);
+        } catch (Exception e) {
+            log.error("Unexpected error while sending approval email to {}: {}", to, e.getMessage(), e);
+        }
+    }
+
+    public void sendApprovedOrRejectedEmail(String to, String domain, String status, String role, String reason) {
+        Objects.requireNonNull(to, "Recipient email required");
+        String subject = "Your account has been approved";
+
+        String plain = "Dear User," + System.lineSeparator() + System.lineSeparator() +
+                "Your account have been "+ status +" for application " + domain + System.lineSeparator() + System.lineSeparator() +
+                "Role : " + role + System.lineSeparator() + System.lineSeparator() +
+                "Comment :" + reason + System.lineSeparator() + System.lineSeparator() +
+                "This is an auto-generated email. Do not reply to this email." + System.lineSeparator() + System.lineSeparator() +
+                "© " + Year.now().getValue() + " madhusudan.space — This message was sent on behalf of AuthCenter.";
+
+        try {
+            MimeMessage message = mailSender.createMimeMessage();
+            MimeMessageHelper helper = new MimeMessageHelper(message, false, "UTF-8");
+
+            helper.setFrom(fromAddress, fromName);
+            helper.setTo(to);
+            helper.setSubject(subject);
+            helper.setText(plain); // plain text only
+            helper.setReplyTo(replyTo);
+
+            // Simple delivery-helpful headers
+            message.addHeader("List-Unsubscribe", buildListUnsubscribeHeader());
+            message.addHeader("X-Mailer", "AuthCenter Mailer");
+
+            mailSender.send(message);
+            log.info("Approval status email sent to {}", to);
+        } catch (MessagingException | UnsupportedEncodingException ex) {
+            log.error("Failed to send Approval status email to {}: {}", to, ex.getMessage(), ex);
+        } catch (Exception ex) {
+            log.error("Unexpected error sending Approval status to {}: {}", to, ex.getMessage(), ex);
+        }
+    }
+
+    public void sendPasswordResetSuccess(String to, String domain){
+        Objects.requireNonNull(to, "Recipient email required");
+        String subject = "Password Reset success";
+
+        String plain = "Dear User," + System.lineSeparator() + System.lineSeparator() +
+                "Password reset is success ..!" + System.lineSeparator() + System.lineSeparator() +
+                "Please try to login with your updated email and password " + domain + System.lineSeparator() + System.lineSeparator() +
+                "This is an auto-generated email. Do not reply to this email." + System.lineSeparator() + System.lineSeparator() +
+                "© " + Year.now().getValue() + " madhusudan.space — This message was sent on behalf of AuthCenter.";
+
+        try {
+            MimeMessage message = mailSender.createMimeMessage();
+            MimeMessageHelper helper = new MimeMessageHelper(message, false, "UTF-8");
+
+            helper.setFrom(fromAddress, fromName);
+            helper.setTo(to);
+            helper.setSubject(subject);
+            helper.setText(plain); // plain text only
+            helper.setReplyTo(replyTo);
+
+            // Simple delivery-helpful headers
+            message.addHeader("List-Unsubscribe", buildListUnsubscribeHeader());
+            message.addHeader("X-Mailer", "AuthCenter Mailer");
+
+            mailSender.send(message);
+            log.info("Password reset success email sent to {}", to);
+        } catch (MessagingException | UnsupportedEncodingException ex) {
+            log.error("Failed to send Password reset success email to {}: {}", to, ex.getMessage(), ex);
+        } catch (Exception ex) {
+            log.error("Unexpected error sending Password reset success to {}: {}", to, ex.getMessage(), ex);
+        }
+    }
+
 }

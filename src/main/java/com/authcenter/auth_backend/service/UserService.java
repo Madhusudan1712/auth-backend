@@ -54,10 +54,9 @@ public class UserService {
         approvalRequest.setApprovalString(approvalString);
         approvalRequestRepository.save(approvalRequest);
 
-        String encryptedId = user.getId().toString(); // Simplified, should encrypt
-        String link = approvalLinkBase;
+        String encryptedId = user.getId().toString();
 
         emailService.sendApprovalRequest(superAdminEmail, encryptedId, approvalString,
-                user.getEmail(), user.getRole(), link);
+                user.getEmail(), user.getRole());
     }
 }

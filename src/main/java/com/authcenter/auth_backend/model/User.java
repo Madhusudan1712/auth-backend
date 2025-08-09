@@ -16,7 +16,7 @@ public class User extends BaseEntity {
     private String email;
     private String password;
     private String role;
-    private String domain;
+    private String application;
 
     private boolean mfaEnabled;
     private String mfaSecret;
@@ -65,12 +65,12 @@ public class User extends BaseEntity {
         this.role = role;
     }
 
-    public String getDomain() {
-        return domain;
+    public String getApplication() {
+        return application;
     }
 
-    public void setDomain(String domain) {
-        this.domain = domain;
+    public void setApplication(String application) {
+        this.application = application;
     }
 
     public boolean isMfaEnabled() {

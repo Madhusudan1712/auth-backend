@@ -5,6 +5,7 @@ import com.authcenter.auth_backend.model.ApprovalRequest;
 import com.authcenter.auth_backend.model.User;
 import com.authcenter.auth_backend.repository.ApprovalRequestRepository;
 import com.authcenter.auth_backend.repository.UserRepository;
+import com.authcenter.auth_backend.service.EmailService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -17,15 +18,18 @@ public class ApprovalController {
 
     private final ApprovalRequestRepository approvalRequestRepository;
     private final UserRepository userRepository;
+    private final EmailService emailService;
 
-    public ApprovalController(ApprovalRequestRepository approvalRequestRepository, UserRepository userRepository) {
+    public ApprovalController(ApprovalRequestRepository approvalRequestRepository, UserRepository userRepository, EmailService emailService) {
         this.approvalRequestRepository = approvalRequestRepository;
         this.userRepository = userRepository;
+        this.emailService = emailService;
     }
 
     @PostMapping("/approve")
     public ResponseEntity<?> approveUser(@RequestParam("userId") String userId,
-                                         @RequestParam("approvalString") String approvalString) {
+                                         @RequestParam("approvalString") String approvalString,
+                                         @RequestBody String reason) {
 
         Optional<ApprovalRequest> requestOpt = approvalRequestRepository.findByApprovalString(approvalString);
         if (requestOpt.isEmpty() || !requestOpt.get().getUserId().equals(userId)) {
@@ -52,12 +56,15 @@ public class ApprovalController {
         request.setApproved(true);
         approvalRequestRepository.save(request);
 
+        String status = "Approved";
+        emailService.sendApprovedOrRejectedEmail(userOpt.get().getEmail(), userOpt.get().getApplication(), status, userOpt.get().getRole(), reason);
         return ResponseEntity.ok(new ApiResponse<>("User approved successfully", null, 200));
     }
 
     @PostMapping("/reject")
     public ResponseEntity<?> rejectUser(@RequestParam("userId") String userId,
-                                        @RequestParam("approvalString") String approvalString) {
+                                        @RequestParam("approvalString") String approvalString,
+                                        @RequestBody String reason) {
 
         Optional<ApprovalRequest> requestOpt = approvalRequestRepository.findByApprovalString(approvalString);
         if (requestOpt.isEmpty() || !requestOpt.get().getUserId().equals(userId)) {
@@ -83,6 +90,8 @@ public class ApprovalController {
         request.setRejected(true);
         approvalRequestRepository.save(request);
 
+        String status = "Rejected";
+        emailService.sendApprovedOrRejectedEmail(userOpt.get().getEmail(),userOpt.get().getApplication(), status, userOpt.get().getRole(), reason);
         return ResponseEntity.ok(new ApiResponse<>("User rejected and deleted successfully", null, 200));
     }
 }

@@ -18,7 +18,7 @@ public class OtpService {
         this.emailService = emailService;
     }
 
-    public void generateAndSendOtp(String email) {
+    public void generateAndSendOtp(String email, String otpRequiredFor) {
         String otp = String.format("%06d", new Random().nextInt(999999));
         OtpToken token = new OtpToken();
         token.setEmail(email);
@@ -26,7 +26,7 @@ public class OtpService {
         token.setExpiresAt(LocalDateTime.now().plusMinutes(10));
         token.setUsed(false);
         otpTokenRepository.save(token);
-        emailService.sendOtpEmail(email, otp);
+        emailService.sendOtpEmail(email, otp, otpRequiredFor);
     }
 
     public boolean validateOtp(String email, String otp) {
