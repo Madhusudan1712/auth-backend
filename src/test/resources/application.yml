@@ -1,0 +1,59 @@
+spring:
+  profiles:
+    active: test
+
+  # Dummy OAuth registrations so auto-config (if touched) never blows up
+  security:
+    oauth2:
+      client:
+        registration:
+          google:
+            client-id: dummy
+            client-secret: dummy
+            scope: openid,profile,email
+            redirect-uri: "{baseUrl}/login/oauth2/code/{registrationId}"
+          github:
+            client-id: dummy
+            client-secret: dummy
+            scope: user:email
+            redirect-uri: "{baseUrl}/login/oauth2/code/{registrationId}"
+          linkedin:
+            client-id: dummy
+            client-secret: dummy
+            scope: r_liteprofile,r_emailaddress
+            redirect-uri: "{baseUrl}/login/oauth2/code/{registrationId}"
+            provider: linkedin
+        provider:
+          linkedin:
+            authorization-uri: https://www.linkedin.com/oauth/v2/authorization
+            token-uri: https://www.linkedin.com/oauth/v2/accessToken
+            user-info-uri: https://api.linkedin.com/v2/me
+            user-name-attribute: id
+
+# Keep CORS property present so @Value binding in SecurityConfig (if read anywhere else) won’t fail
+authcenter:
+  cors:
+    allowed-origins: "http://localhost:5000"
+
+# (Optional) If your context touches the DB in tests, switch to H2:
+# 1) Add test dependency to pom.xml:
+#    <dependency>
+#      <groupId>com.h2database</groupId>
+#      <artifactId>h2</artifactId>
+#      <scope>test</scope>
+#    </dependency>
+#
+# 2) Uncomment the block below:
+#spring:
+#  datasource:
+#    url: jdbc:h2:mem:authdb;MODE=PostgreSQL;DB_CLOSE_DELAY=-1;DATABASE_TO_UPPER=false
+#    driver-class-name: org.h2.Driver
+#    username: sa
+#    password:
+#  jpa:
+#    hibernate:
+#      ddl-auto: none
+#    properties:
+#      hibernate:
+#        dialect: org.hibernate.dialect.PostgreSQLDialect
+#        default_schema: PUBLIC
