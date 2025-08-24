@@ -5,6 +5,7 @@ import com.authcenter.auth_backend.dto.response.ApiResponse;
 import com.authcenter.auth_backend.model.User;
 import com.authcenter.auth_backend.security.JwtService;
 import com.authcenter.auth_backend.service.*;
+import com.authcenter.auth_backend.util.CookieUtil;
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -97,7 +98,7 @@ public class AuthController {
         claims.put("name", user.getName());
         claims.put("email", user.getEmail());
         claims.put("role", user.getRole());
-        claims.put("domain", user.getApplication());
+        claims.put("application", user.getApplication());
 
         String newAccessToken = jwtService.generateAccessToken(claims, email, jwtAccessExpirationMs);
 
@@ -137,23 +138,13 @@ public class AuthController {
         }
         String v = userOpt.get().getApplication();
 
-        try {
-            URI redirectUri = new URI(req.getRedirect());
-            String redirectHost = redirectUri.getHost();
-            if (!Objects.equals(userOpt.get().getApplication(), redirectHost)) {
-                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                        .body(new ApiResponse<>(
-                                "User not registered to this application, please verify and register to this application",
-                                null,
-                                401
-                        ));
-            }
-        } catch (URISyntaxException e) {
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                    .body(new ApiResponse<>("Invalid redirect URI format", null, 400));
+        User user = userOpt.get();
+
+        if (!Objects.equals(userOpt.get().getApplication(), user.getApplication())) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(new ApiResponse<>("User not registered to this application",null,401));
         }
 
-        User user = userOpt.get();
         if (!user.isApproved()) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN)
                     .body(new ApiResponse<>("Account not approved yet", null, 403));
@@ -164,36 +155,14 @@ public class AuthController {
         claims.put("name", user.getName());
         claims.put("email", user.getEmail());
         claims.put("role", user.getRole());
-        claims.put("domain", req.getRedirect());
+        claims.put("application", user.getApplication());
 
         // Generate access and refresh tokens
         String accessToken = jwtService.generateAccessToken(claims, user.getEmail(), jwtAccessExpirationMs);
         String refreshToken = jwtService.generateRefreshToken(user.getEmail(), jwtRefreshExpirationMs);
 
-        // Set access token in cookie
-        Cookie accessCookie = new Cookie("auth_token", accessToken);
-        accessCookie.setHttpOnly(true);
-        accessCookie.setSecure(false); // true in production with HTTPS
-        accessCookie.setPath("/");
-        accessCookie.setMaxAge((int) Duration.ofMillis(jwtAccessExpirationMs).getSeconds());
-        response.addCookie(accessCookie);
+        CookieUtil.addAuthCookies(request, response, accessToken, refreshToken, jwtAccessExpirationMs, jwtRefreshExpirationMs);
 
-        // Set refresh token in cookie
-        Cookie refreshCookie = new Cookie("refresh_token", refreshToken);
-        refreshCookie.setHttpOnly(true);
-        refreshCookie.setSecure(false); // true in production
-        refreshCookie.setPath("/");
-        refreshCookie.setMaxAge((int) Duration.ofMillis(jwtRefreshExpirationMs).getSeconds());
-        response.addCookie(refreshCookie);
-
-        String requestDomain = request.getServerName();
-
-        if (requestDomain.endsWith("madhusudan.space")) {
-            accessCookie.setDomain(".madhusudan.space");
-            refreshCookie.setDomain(".madhusudan.space");
-        }
-
-        // Safe redirect validation
         String redirectUri = req.getRedirect();
         if (redirectUri != null && !redirectUri.isBlank()) {
             try {
@@ -201,7 +170,6 @@ public class AuthController {
                 String host = uri.getHost();
                 int port = uri.getPort();
                 String scheme = uri.getScheme();
-                String origin = scheme + "://" + host + (port != -1 ? ":" + port : "");
 
                 boolean isAllowed = Arrays.stream(allowedRedirectOrigins)
                         .map(String::trim)
@@ -211,8 +179,8 @@ public class AuthController {
                                 return allowedUri.getHost() != null
                                         && host != null
                                         && host.equalsIgnoreCase(allowedUri.getHost())
-                                        && allowedUri.getPort() == port
-                                        && allowedUri.getScheme().equalsIgnoreCase(scheme);
+                                        && allowedUri.getScheme().equalsIgnoreCase(scheme)
+                                        && (allowedUri.getPort() == -1 || allowedUri.getPort() == port);
                             } catch (Exception e) {
                                 return false;
                             }
@@ -232,6 +200,7 @@ public class AuthController {
         }
 
         return ResponseEntity.ok(new ApiResponse<>("Login successful", null, 200));
+
     }
 
     @PostMapping("/otp")
@@ -337,15 +306,26 @@ public class AuthController {
     }
 
     @PostMapping("/logout")
-    public ResponseEntity<?> logout(HttpServletResponse response) {
-        Cookie cookie = new Cookie("auth_token", null);
-        cookie.setMaxAge(0);
-        cookie.setHttpOnly(true);
-        cookie.setSecure(false);
-        cookie.setPath("/");
-        //cookie.setDomain(".madhusudan.space"); // adjust in prod
-        response.addCookie(cookie);
+    public ResponseEntity<?> logout(HttpServletResponse response, HttpServletRequest request) {
+        // remove access token
+        Cookie accessCookie = new Cookie("auth_token", null);
+        accessCookie.setMaxAge(0);
+        accessCookie.setHttpOnly(true);
+        accessCookie.setSecure(request.isSecure());
+        accessCookie.setPath("/");
+        accessCookie.setDomain("madhusudan.space");
+        response.addCookie(accessCookie);
+
+        // remove refresh token
+        Cookie refreshCookie = new Cookie("refresh_token", null);
+        refreshCookie.setMaxAge(0);
+        refreshCookie.setHttpOnly(true);
+        refreshCookie.setSecure(request.isSecure());
+        refreshCookie.setPath("/");
+        refreshCookie.setDomain("madhusudan.space");
+        response.addCookie(refreshCookie);
 
         return ResponseEntity.ok(new ApiResponse<>("Logged out successfully", null, 200));
     }
+
 }
