@@ -56,6 +56,7 @@ public class SecurityConfig {
                     config.setAllowedOrigins(Arrays.asList(allowedOrigins));
                     config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
                     config.setAllowedHeaders(List.of("*"));
+                    config.setExposedHeaders(List.of("Set-Cookie", "Authorization", "Location"));
                     config.setAllowCredentials(true);
                     return config;
                 }))

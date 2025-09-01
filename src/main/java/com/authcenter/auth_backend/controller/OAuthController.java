@@ -4,7 +4,6 @@ import com.authcenter.auth_backend.model.User;
 import com.authcenter.auth_backend.repository.UserRepository;
 import com.authcenter.auth_backend.security.JwtService;
 import com.authcenter.auth_backend.util.CookieUtil;
-import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Value;
@@ -17,7 +16,8 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.io.IOException;
 import java.net.URI;
-import java.time.Duration;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 
 @RestController
@@ -53,7 +53,7 @@ public class OAuthController {
         if (authentication instanceof OAuth2AuthenticationToken oauth2Auth) {
             attributes = oauth2Auth.getPrincipal().getAttributes();
         } else if (authentication.getPrincipal() instanceof User user) {
-            // If JwtAuthenticationFilter already replaced the principal
+            // JwtAuthenticationFilter replaced the principal already
             attributes.put("email", user.getEmail());
             attributes.put("name", user.getName());
         } else {
@@ -82,58 +82,19 @@ public class OAuthController {
             return;
         }
 
-        // Claims
-        Map<String, Object> claims = new HashMap<>();
-        claims.put("id", user.getId().toString());
-        claims.put("name", user.getName());
-        claims.put("email", user.getEmail());
-        claims.put("role", user.getRole());
-        claims.put("application", user.getApplication());
-
-        // Generate tokens
-        String accessToken = jwtService.generateAccessToken(claims, user.getEmail(), jwtAccessExpirationMs);
-        String refreshToken = jwtService.generateRefreshToken(user.getEmail(), jwtRefreshExpirationMs);
-
-        CookieUtil.addAuthCookies(request, response, accessToken, refreshToken, jwtAccessExpirationMs, jwtRefreshExpirationMs);
-
-        // Validate redirect
-        if (redirect != null && !redirect.isBlank()) {
-            try {
-                URI uri = new URI(redirect);
-                String host = uri.getHost();
-                int port = uri.getPort();
-                String scheme = uri.getScheme();
-
-                boolean isAllowed = Arrays.stream(allowedRedirectOrigins)
-                        .map(String::trim)
-                        .anyMatch(allowed -> {
-                            try {
-                                URI allowedUri = new URI(allowed);
-                                return allowedUri.getHost() != null
-                                        && host != null
-                                        && host.equalsIgnoreCase(allowedUri.getHost())
-                                        && allowedUri.getScheme().equalsIgnoreCase(scheme)
-                                        && (allowedUri.getPort() == -1 || allowedUri.getPort() == port);
-                            } catch (Exception e) {
-                                return false;
-                            }
-                        });
-
-                if (isAllowed) {
-                    // ✅ redirect browser to client app
-                    response.sendRedirect(redirect);
-                    return;
-                } else {
-                    response.sendError(HttpServletResponse.SC_FORBIDDEN, "Redirect URI not allowed");
-                    return;
-                }
-            } catch (Exception e) {
-                response.sendError(HttpServletResponse.SC_BAD_REQUEST, "Invalid redirect URI format");
-                return;
-            }
+        // ✅ MFA check — behaves like /auth/login
+        if (!user.isMfaEnabled()) {
+            // Force MFA setup
+            String mfaSetupUrl = "http://authcenter.madhusudan.space:5000/mfa/setup?userId=" + user.getId()
+                    + "&redirect=" + URLEncoder.encode(redirect, StandardCharsets.UTF_8);
+            response.sendRedirect(mfaSetupUrl);
+            return;
+        } else {
+            // MFA already enabled → redirect to verify page
+            String mfaVerifyUrl = "http://authcenter.madhusudan.space:5000/mfa/verify-page?userId=" + user.getId()
+                    + "&redirect=" + URLEncoder.encode(redirect, StandardCharsets.UTF_8);
+            response.sendRedirect(mfaVerifyUrl);
+            return;
         }
-
-        // fallback if no redirect param
-        response.sendRedirect("https://authcenter.madhusudan.space");
     }
 }

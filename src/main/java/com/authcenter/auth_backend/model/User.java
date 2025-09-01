@@ -1,7 +1,6 @@
 package com.authcenter.auth_backend.model;
 
 import jakarta.persistence.*;
-import java.time.LocalDateTime;
 import java.util.UUID;
 
 @Entity
@@ -18,8 +17,9 @@ public class User extends BaseEntity {
     private String role;
     private String application;
 
-    private boolean mfaEnabled;
+    private boolean mfaEnabled = false;
     private String mfaSecret;
+    private boolean mfaBypassed = false;
 
     private boolean approved = false;
 
@@ -87,6 +87,14 @@ public class User extends BaseEntity {
 
     public void setMfaSecret(String mfaSecret) {
         this.mfaSecret = mfaSecret;
+    }
+
+    public boolean isMfaBypassed() {
+        return mfaBypassed;
+    }
+
+    public void setMfaBypassed(boolean mfaBypassed) {
+        this.mfaBypassed = mfaBypassed;
     }
 
     public boolean isApproved() {

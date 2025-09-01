@@ -19,6 +19,8 @@ import org.springframework.web.bind.annotation.*;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.*;
 
@@ -136,13 +138,12 @@ public class AuthController {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body(new ApiResponse<>("Invalid email or password", null, 401));
         }
-        String v = userOpt.get().getApplication();
 
         User user = userOpt.get();
 
         if (!Objects.equals(userOpt.get().getApplication(), user.getApplication())) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body(new ApiResponse<>("User not registered to this application",null,401));
+                    .body(new ApiResponse<>("User not registered to this application", null, 401));
         }
 
         if (!user.isApproved()) {
@@ -150,57 +151,33 @@ public class AuthController {
                     .body(new ApiResponse<>("Account not approved yet", null, 403));
         }
 
-        Map<String, Object> claims = new HashMap<>();
-        claims.put("id", user.getId().toString());
-        claims.put("name", user.getName());
-        claims.put("email", user.getEmail());
-        claims.put("role", user.getRole());
-        claims.put("application", user.getApplication());
-
-        // Generate access and refresh tokens
-        String accessToken = jwtService.generateAccessToken(claims, user.getEmail(), jwtAccessExpirationMs);
-        String refreshToken = jwtService.generateRefreshToken(user.getEmail(), jwtRefreshExpirationMs);
-
-        CookieUtil.addAuthCookies(request, response, accessToken, refreshToken, jwtAccessExpirationMs, jwtRefreshExpirationMs);
-
-        String redirectUri = req.getRedirect();
-        if (redirectUri != null && !redirectUri.isBlank()) {
-            try {
-                URI uri = new URI(redirectUri);
-                String host = uri.getHost();
-                int port = uri.getPort();
-                String scheme = uri.getScheme();
-
-                boolean isAllowed = Arrays.stream(allowedRedirectOrigins)
-                        .map(String::trim)
-                        .anyMatch(allowed -> {
-                            try {
-                                URI allowedUri = new URI(allowed);
-                                return allowedUri.getHost() != null
-                                        && host != null
-                                        && host.equalsIgnoreCase(allowedUri.getHost())
-                                        && allowedUri.getScheme().equalsIgnoreCase(scheme)
-                                        && (allowedUri.getPort() == -1 || allowedUri.getPort() == port);
-                            } catch (Exception e) {
-                                return false;
-                            }
-                        });
-
-                if (isAllowed) {
-                    return ResponseEntity.ok(new ApiResponse<>("Login successful", Map.of("redirect", redirectUri), 200));
-                } else {
-                    return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                            .body(new ApiResponse<>("Redirect URI not allowed", null, 403));
-                }
-
-            } catch (Exception e) {
-                return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                        .body(new ApiResponse<>("Invalid redirect URI format", null, 400));
-            }
+        // If MFA is NOT enabled → QR setup first
+        if (!user.isMfaEnabled()) {
+            return ResponseEntity.ok(
+                    new ApiResponse<>(
+                            "MFA setup required",
+                            Map.of(
+                                    "mfaRequired", true,
+                                    "redirect", "http://authcenter.madhusudan.space:5000/mfa/setup?userId=" + user.getId()
+                                            + "&redirect=" + URLEncoder.encode(req.getRedirect(), StandardCharsets.UTF_8)
+                            ),
+                            200
+                    )
+            );
         }
 
-        return ResponseEntity.ok(new ApiResponse<>("Login successful", null, 200));
-
+        // If MFA already enabled → go to OTP verification page
+        return ResponseEntity.ok(
+                new ApiResponse<>(
+                        "MFA verification required",
+                        Map.of(
+                                "mfaRequired", true,
+                                "redirect", "http://authcenter.madhusudan.space:5000/mfa/verify-page?userId=" + user.getId()
+                                        + "&redirect=" + URLEncoder.encode(req.getRedirect(), StandardCharsets.UTF_8)
+                        ),
+                        200
+                )
+        );
     }
 
     @PostMapping("/otp")
