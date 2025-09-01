@@ -39,4 +39,23 @@ public class OtpService {
                 })
                 .orElse(false);
     }
+
+    public String issue(String email, int ttlMinutes) {
+        String code = String.format("%06d", new Random().nextInt(1_000_000));
+        OtpToken t = new OtpToken();
+        t.setEmail(email);
+        t.setOtp(code);
+        t.setExpiresAt(LocalDateTime.now().plusMinutes(ttlMinutes));
+        t.setUsed(false);
+        otpTokenRepository.save(t);
+        return code;
+    }
+
+    public boolean consume(String email, String code) {
+        return otpTokenRepository.findTopByEmailAndUsedFalseOrderByExpiresAtDesc(email)
+                .filter(t -> t.getExpiresAt().isAfter(LocalDateTime.now()))
+                .filter(t -> t.getOtp().equals(code))
+                .map(t -> { t.setUsed(true); otpTokenRepository.save(t); return true; })
+                .orElse(false);
+    }
 }
