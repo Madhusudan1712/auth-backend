@@ -16,6 +16,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.io.IOException;
 import java.net.URI;
+import java.net.URISyntaxException;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
@@ -65,13 +66,23 @@ public class OAuthController {
         String email = (String) attributes.get("email");
         String name = (String) attributes.getOrDefault("name", email.split("@")[0]);
 
+        String tempRedirectHost;
+        try {
+            URI redirectUri = new URI(redirect);
+            tempRedirectHost = redirectUri.getHost();
+        } catch (URISyntaxException e) {
+            tempRedirectHost = redirect;
+        }
+
+        final String redirectHost = tempRedirectHost;
+
         // Fetch or create user
         User user = userRepository.findByEmail(email)
                 .orElseGet(() -> {
                     User newUser = new User();
                     newUser.setEmail(email);
                     newUser.setName(name);
-                    newUser.setApplication(redirect);
+                    newUser.setApplication(redirectHost);
                     newUser.setRole("user");
                     newUser.setApproved(true);
                     return userRepository.save(newUser);

@@ -224,13 +224,16 @@ public class AuthController {
         user.setPassword(passwordEncoder.encode(req.getPassword()));
         user.setName(req.getEmail().split("@")[0]);
 
-        String redirectHost = null;
+        String tempRedirectHost;
         try {
             URI redirectUri = new URI(req.getRedirect());
-            redirectHost = redirectUri.getHost();
+            tempRedirectHost = redirectUri.getHost();
         } catch (URISyntaxException e) {
-            redirectHost = req.getRedirect();
+            tempRedirectHost = req.getRedirect();
         }
+
+        final String redirectHost = tempRedirectHost;
+
         user.setApplication(redirectHost);
 
         user.setApproved(req.getRole().equalsIgnoreCase("user"));

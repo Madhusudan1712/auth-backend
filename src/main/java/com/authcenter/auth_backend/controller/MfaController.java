@@ -155,9 +155,76 @@ public class MfaController {
     }
 
     @PostMapping("/skip")
-    public ResponseEntity<?> skip(@RequestParam UUID userId) {
-        return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                .body(new ApiResponse<>("Skipping MFA setup is not allowed", null, 403));
+    public ResponseEntity<?> skip(
+            @RequestParam UUID userId,
+            @RequestParam String redirect,
+            HttpServletRequest request,
+            HttpServletResponse response
+    ) {
+        Optional<User> u = userRepository.findById(userId);
+        if (u.isEmpty()) {
+            return ResponseEntity.badRequest().body(new ApiResponse<>("User not found", null, 400));
+        }
+
+        User user = u.get();
+
+        // ❌ If MFA already enabled, skipping is not allowed
+        if (user.isMfaEnabled()) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(new ApiResponse<>("MFA already enabled. Cannot skip setup.", null, 403));
+        }
+
+        // ✅ Generate JWT tokens (same as verify)
+        Map<String, Object> claims = new HashMap<>();
+        claims.put("id", user.getId().toString());
+        claims.put("name", user.getName());
+        claims.put("email", user.getEmail());
+        claims.put("role", user.getRole());
+        claims.put("application", user.getApplication());
+
+        String accessToken = jwtService.generateAccessToken(claims, user.getEmail(), jwtAccessExpirationMs);
+        String refreshToken = jwtService.generateRefreshToken(user.getEmail(), jwtRefreshExpirationMs);
+        CookieUtil.addAuthCookies(request, response, accessToken, refreshToken, jwtAccessExpirationMs, jwtRefreshExpirationMs);
+
+        // ✅ Allow redirect only if it's safe
+        try {
+            URI uri = new URI(redirect);
+            String host = uri.getHost();
+            int port = uri.getPort();
+            String scheme = uri.getScheme();
+
+            boolean isAllowed = Arrays.stream(allowedRedirectOrigins)
+                    .map(String::trim)
+                    .anyMatch(allowed -> {
+                        try {
+                            URI allowedUri = new URI(allowed);
+                            return allowedUri.getHost() != null
+                                    && host != null
+                                    && host.equalsIgnoreCase(allowedUri.getHost())
+                                    && allowedUri.getScheme().equalsIgnoreCase(scheme)
+                                    && (allowedUri.getPort() == -1 || allowedUri.getPort() == port);
+                        } catch (Exception e) {
+                            return false;
+                        }
+                    });
+
+            if (isAllowed) {
+                return ResponseEntity.ok(
+                        new ApiResponse<>(
+                                "MFA skipped successfully",
+                                Map.of("redirect", redirect),
+                                200
+                        )
+                );
+            } else {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                        .body(new ApiResponse<>("Redirect URI not allowed", null, 403));
+            }
+
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(new ApiResponse<>("Invalid redirect URI format", null, 400));
+        }
     }
 
     @PostMapping("/request-disable")
