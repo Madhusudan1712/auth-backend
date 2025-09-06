@@ -1,9 +1,10 @@
 package com.authcenter.auth_backend.controller;
 
+import com.authcenter.auth_backend.model.Role;
+import com.authcenter.auth_backend.model.Status;
 import com.authcenter.auth_backend.model.User;
 import com.authcenter.auth_backend.repository.UserRepository;
 import com.authcenter.auth_backend.security.JwtService;
-import com.authcenter.auth_backend.util.CookieUtil;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Value;
@@ -76,22 +77,17 @@ public class OAuthController {
 
         final String redirectHost = tempRedirectHost;
 
-        // Fetch or create user
-        User user = userRepository.findByEmail(email)
+        // Fetch or create user per application
+        User user = userRepository.findByEmailAndApplication(email, redirectHost)
                 .orElseGet(() -> {
                     User newUser = new User();
                     newUser.setEmail(email);
                     newUser.setName(name);
                     newUser.setApplication(redirectHost);
-                    newUser.setRole("user");
-                    newUser.setApproved(true);
+                    newUser.addRole(Role.USER, null, Status.APPROVED);
                     return userRepository.save(newUser);
                 });
 
-        if (!user.isApproved()) {
-            response.sendError(HttpServletResponse.SC_FORBIDDEN, "Account not approved yet");
-            return;
-        }
 
         // ✅ MFA check — behaves like /auth/login
         if (!user.isMfaEnabled()) {

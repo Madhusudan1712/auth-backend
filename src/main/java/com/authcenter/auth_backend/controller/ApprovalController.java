@@ -1,97 +1,124 @@
 package com.authcenter.auth_backend.controller;
 
+import com.authcenter.auth_backend.dto.request.ApproveRejectRequest;
 import com.authcenter.auth_backend.dto.response.ApiResponse;
-import com.authcenter.auth_backend.model.ApprovalRequest;
+import com.authcenter.auth_backend.model.Status;
 import com.authcenter.auth_backend.model.User;
-import com.authcenter.auth_backend.repository.ApprovalRequestRepository;
+import com.authcenter.auth_backend.model.UserRole;
 import com.authcenter.auth_backend.repository.UserRepository;
+import com.authcenter.auth_backend.repository.UserRoleRepository;
 import com.authcenter.auth_backend.service.EmailService;
+import com.authcenter.auth_backend.service.UserRoleService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
 import java.util.Optional;
 
 @RestController
 @RequestMapping("/approval")
 public class ApprovalController {
 
-    private final ApprovalRequestRepository approvalRequestRepository;
     private final UserRepository userRepository;
+    private final UserRoleRepository userRoleRepository;
+    private final UserRoleService userRoleService;
     private final EmailService emailService;
 
-    public ApprovalController(ApprovalRequestRepository approvalRequestRepository, UserRepository userRepository, EmailService emailService) {
-        this.approvalRequestRepository = approvalRequestRepository;
+    public ApprovalController(UserRepository userRepository, UserRoleRepository userRoleRepository, UserRoleService userRoleService, EmailService emailService) {
         this.userRepository = userRepository;
+        this.userRoleRepository = userRoleRepository;
+        this.userRoleService = userRoleService;
         this.emailService = emailService;
     }
 
     @PostMapping("/approve")
-    public ResponseEntity<?> approveUser(@RequestParam("userId") String userId,
-                                         @RequestParam("approvalString") String approvalString,
-                                         @RequestBody String reason) {
+    public ResponseEntity<?> approveUser(@RequestBody ApproveRejectRequest req) {
 
-        Optional<ApprovalRequest> requestOpt = approvalRequestRepository.findByApprovalString(approvalString);
-        if (requestOpt.isEmpty() || !requestOpt.get().getUserId().equals(userId)) {
-            return ResponseEntity.status(HttpStatus.NOT_FOUND)
-                    .body(new ApiResponse<>("Invalid approval string or user", null, 404));
-        }
+        Optional<User> userOpt = userRepository.findById(java.util.UUID.fromString(req.getUserId()));
 
-        ApprovalRequest request = requestOpt.get();
-        if (request.isApproved() || request.isRejected()) {
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                    .body(new ApiResponse<>("Request already processed", null, 400));
-        }
-
-        Optional<User> userOpt = userRepository.findById(java.util.UUID.fromString(userId));
         if (userOpt.isEmpty()) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND)
                     .body(new ApiResponse<>("User not found", null, 404));
         }
 
         User user = userOpt.get();
-        user.setApproved(true);
-        userRepository.save(user);
 
-        request.setApproved(true);
-        approvalRequestRepository.save(request);
+        Optional<UserRole> requestOpt = userRoleRepository.findByApprovalString(req.getApprovalString());
 
-        String status = "Approved";
-        emailService.sendApprovedOrRejectedEmail(userOpt.get().getEmail(), userOpt.get().getApplication(), status, userOpt.get().getRole(), reason);
-        return ResponseEntity.ok(new ApiResponse<>("User approved successfully", null, 200));
-    }
-
-    @PostMapping("/reject")
-    public ResponseEntity<?> rejectUser(@RequestParam("userId") String userId,
-                                        @RequestParam("approvalString") String approvalString,
-                                        @RequestBody String reason) {
-
-        Optional<ApprovalRequest> requestOpt = approvalRequestRepository.findByApprovalString(approvalString);
-        if (requestOpt.isEmpty() || !requestOpt.get().getUserId().equals(userId)) {
+        if (requestOpt.isEmpty()) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND)
-                    .body(new ApiResponse<>("Invalid approval string or user", null, 404));
+                    .body(new ApiResponse<>("Approval request expired", null, 404));
         }
 
-        ApprovalRequest request = requestOpt.get();
+        UserRole request = requestOpt.get();
         if (request.isApproved() || request.isRejected()) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                     .body(new ApiResponse<>("Request already processed", null, 400));
         }
 
-        Optional<User> userOpt = userRepository.findById(java.util.UUID.fromString(userId));
+        if (!requestOpt.get().getUser().equals(user)) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(new ApiResponse<>("Invalid approval string or user", null, 404));
+        }
+
+        List<UserRole> userRoles = userRoleRepository.findAllByUser(user);
+        for (UserRole userRole : userRoles) {
+            String currentRole = userRole.getRole().toString().toUpperCase();
+            if(currentRole.equals(req.getRole())) {
+                userRole.setApproved(true);
+                userRole.setRejected(false);
+                userRole.setApprovalString(null);
+                userRoleService.save(userRole);
+            }
+        }
+
+        emailService.sendApprovedOrRejectedEmail(userOpt.get().getEmail(), userOpt.get().getApplication(), Status.APPROVED, req.getReason());
+        return ResponseEntity.ok(new ApiResponse<>("User approved successfully", null, 200));
+    }
+
+    @PostMapping("/reject")
+    public ResponseEntity<?> rejectUser(@RequestBody ApproveRejectRequest req) {
+
+        Optional<User> userOpt = userRepository.findById(java.util.UUID.fromString(req.getUserId()));
+
         if (userOpt.isEmpty()) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND)
                     .body(new ApiResponse<>("User not found", null, 404));
         }
 
-        // Optional: Delete or deactivate user
-        userRepository.delete(userOpt.get());
+        User user = userOpt.get();
 
-        request.setRejected(true);
-        approvalRequestRepository.save(request);
+        Optional<UserRole> requestOpt = userRoleRepository.findByApprovalString(req.getApprovalString());
 
-        String status = "Rejected";
-        emailService.sendApprovedOrRejectedEmail(userOpt.get().getEmail(),userOpt.get().getApplication(), status, userOpt.get().getRole(), reason);
+        if (requestOpt.isEmpty()) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(new ApiResponse<>("Approval request expired", null, 404));
+        }
+
+        UserRole request = requestOpt.get();
+        if (request.isApproved() || request.isRejected()) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(new ApiResponse<>("Request already processed", null, 400));
+        }
+
+        if (!requestOpt.get().getUser().equals(user)) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(new ApiResponse<>("Invalid approval string or user", null, 404));
+        }
+
+        List<UserRole> userRoles = userRoleRepository.findAllByUser(user);
+        for (UserRole userRole : userRoles) {
+            String currentRole = userRole.getRole().toString().toUpperCase();
+            if(currentRole.equals(req.getRole())) {
+                userRole.setApproved(false);
+                userRole.setRejected(true);
+                userRole.setApprovalString(null);
+                userRoleService.save(userRole);
+            }
+        }
+
+        emailService.sendApprovedOrRejectedEmail(userOpt.get().getEmail(),userOpt.get().getApplication(), Status.REJECTED, req.getReason());
         return ResponseEntity.ok(new ApiResponse<>("User rejected and deleted successfully", null, 200));
     }
 }

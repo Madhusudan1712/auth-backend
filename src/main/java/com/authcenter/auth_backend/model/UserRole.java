@@ -1,53 +1,53 @@
 package com.authcenter.auth_backend.model;
 
 import jakarta.persistence.*;
+import java.util.UUID;
 
 @Entity
-@Table(name = "approval_requests")
-public class ApprovalRequest {
+@Table(
+        name = "user_roles",
+        uniqueConstraints = @UniqueConstraint(
+                name = "uk_user_role",
+                columnNames = {"user_id", "role"}
+        )
+)
+public class UserRole {
 
     @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
+    @GeneratedValue(strategy = GenerationType.UUID)
+    private UUID id;
 
-    private String userId;
-    private String email;
-    private String role;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "user_id", nullable = false)
+    private User user;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    private Role role;
+
     private String approvalString;
     private boolean approved;
     private boolean rejected;
 
-    // Getters and setters
-
-    public Long getId() {
+    // getters, setters
+    public UUID getId() {
         return id;
     }
-
-    public void setId(Long id) {
+    public void setId(UUID id) {
         this.id = id;
     }
 
-    public String getUserId() {
-        return userId;
+    public User getUser() {
+        return user;
+    }
+    public void setUser(User user) {
+        this.user = user;
     }
 
-    public void setUserId(String userId) {
-        this.userId = userId;
-    }
-
-    public String getEmail() {
-        return email;
-    }
-
-    public void setEmail(String email) {
-        this.email = email;
-    }
-
-    public String getRole() {
+    public Role getRole() {
         return role;
     }
-
-    public void setRole(String role) {
+    public void setRole(Role role) {
         this.role = role;
     }
 
@@ -75,4 +75,3 @@ public class ApprovalRequest {
         this.rejected = rejected;
     }
 }
-

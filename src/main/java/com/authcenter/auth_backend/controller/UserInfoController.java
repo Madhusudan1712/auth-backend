@@ -1,6 +1,7 @@
 package com.authcenter.auth_backend.controller;
 
 import com.authcenter.auth_backend.dto.response.ApiResponse;
+import com.authcenter.auth_backend.dto.response.UserDto;
 import com.authcenter.auth_backend.model.User;
 import com.authcenter.auth_backend.repository.UserRepository;
 import com.authcenter.auth_backend.security.JwtService;
@@ -41,16 +42,20 @@ public class UserInfoController {
                     .body(new ApiResponse<>("Unauthorized", null, 401));
         }
 
-        // 2. Extract email (subject) from JWT
+        // 2. Extract email + application from JWT
         String email = jwtService.extractEmail(token);
+        String application = jwtService.extractClaim(token, claims -> (String) claims.get("application"));
 
-        // 3. Lookup user in DB
-        Optional<User> userOpt = userRepository.findByEmail(email);
+        // 3. Lookup user by email + application
+        Optional<User> userOpt = userRepository.findByEmailAndApplication(email, application);
         if (userOpt.isEmpty()) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND)
                     .body(new ApiResponse<>("User not found", null, 404));
         }
 
-        return ResponseEntity.ok(new ApiResponse<>("Authenticated user", userOpt.get(), 200));
+        // 4. Convert to DTO
+        UserDto userDto = new UserDto(userOpt.get());
+
+        return ResponseEntity.ok(new ApiResponse<>("Authenticated user", userDto, 200));
     }
 }

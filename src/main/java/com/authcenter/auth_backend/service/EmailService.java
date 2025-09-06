@@ -1,5 +1,7 @@
 package com.authcenter.auth_backend.service;
 
+import com.authcenter.auth_backend.model.Role;
+import com.authcenter.auth_backend.model.Status;
 import jakarta.mail.MessagingException;
 import jakarta.mail.internet.MimeMessage;
 import org.slf4j.Logger;
@@ -133,7 +135,7 @@ public class EmailService {
                                     String encryptedUserId,
                                     String approvalString,
                                     String userEmail,
-                                    String role) {
+                                    Role role) {
 
         Objects.requireNonNull(to, "Recipient email required");
 
@@ -148,22 +150,33 @@ public class EmailService {
         }
 
         try {
-            // Build action link (URL-encode params)
+            // URL encode parameters safely
             String encodedId = URLEncoder.encode(encryptedUserId == null ? "" : encryptedUserId, StandardCharsets.UTF_8);
             String encodedApproval = URLEncoder.encode(approvalString == null ? "" : approvalString, StandardCharsets.UTF_8);
-            String actionLink = String.format("%s?userId=%s&approvalString=%s", approvalBase, encodedId, encodedApproval);
+            String encodedRole = URLEncoder.encode(role == null ? "" : role.name(), StandardCharsets.UTF_8);
 
-            // Plain text body (matches your sample)
+            // ✅ Include role in the approval link
+            String actionLink = String.format(
+                    "%s?userId=%s&approvalString=%s&role=%s",
+                    approvalBase,
+                    encodedId,
+                    encodedApproval,
+                    encodedRole
+            );
+
+            // Build plain text email body
             StringBuilder plain = new StringBuilder();
             plain.append("Hello Madhusudan,").append(System.lineSeparator()).append(System.lineSeparator());
-            plain.append("A new administrator account request requires your review please approve or reject by verifying the account. Below are the details:").append(System.lineSeparator()).append(System.lineSeparator());
-            plain.append("User ID: \t").append(encryptedUserId).append(System.lineSeparator());
-            plain.append("Email :\t").append(userEmail).append(System.lineSeparator());
-            plain.append("Role :\t").append(role).append(System.lineSeparator());
-            plain.append("Approval code :\t").append(approvalString).append(System.lineSeparator()).append(System.lineSeparator());
+            plain.append("A new administrator account request requires your review. Please approve or reject by verifying the account. Below are the details:")
+                    .append(System.lineSeparator()).append(System.lineSeparator());
+            plain.append("User ID:\t").append(encryptedUserId).append(System.lineSeparator());
+            plain.append("Email:\t").append(userEmail).append(System.lineSeparator());
+            plain.append("Role:\t").append(role).append(System.lineSeparator());
+            plain.append("Approval code:\t").append(approvalString).append(System.lineSeparator()).append(System.lineSeparator());
             plain.append("Take action (approve or reject):").append(System.lineSeparator());
             plain.append(actionLink).append(System.lineSeparator()).append(System.lineSeparator());
-            plain.append("If you don't have access or believe this is in error, contact ").append(replyTo).append(".").append(System.lineSeparator()).append(System.lineSeparator());
+            plain.append("If you don't have access or believe this is in error, contact ")
+                    .append(replyTo).append(".").append(System.lineSeparator()).append(System.lineSeparator());
             plain.append("© ").append(Year.now().getValue()).append(" madhusudan.space — This message was sent on behalf of AuthCenter.");
 
             String plainTextBody = plain.toString();
@@ -174,7 +187,7 @@ public class EmailService {
             helper.setFrom(fromAddress, fromName);
             helper.setTo(to);
             helper.setSubject(subject);
-            helper.setText(plainTextBody); // plain only
+            helper.setText(plainTextBody);
             helper.setReplyTo(replyTo);
 
             // Helpful headers
@@ -193,13 +206,12 @@ public class EmailService {
         }
     }
 
-    public void sendApprovedOrRejectedEmail(String to, String domain, String status, String role, String reason) {
+    public void sendApprovedOrRejectedEmail(String to, String domain, Status status, String reason) {
         Objects.requireNonNull(to, "Recipient email required");
         String subject = "Your account has been approved";
 
         String plain = "Dear User," + System.lineSeparator() + System.lineSeparator() +
                 "Your account have been "+ status +" for application " + domain + System.lineSeparator() + System.lineSeparator() +
-                "Role : " + role + System.lineSeparator() + System.lineSeparator() +
                 "Comment :" + reason + System.lineSeparator() + System.lineSeparator() +
                 "This is an auto-generated email. Do not reply to this email." + System.lineSeparator() + System.lineSeparator() +
                 "© " + Year.now().getValue() + " madhusudan.space — This message was sent on behalf of AuthCenter.";

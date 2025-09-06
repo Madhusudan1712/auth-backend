@@ -2,10 +2,15 @@ package com.authcenter.auth_backend.controller;
 
 import com.authcenter.auth_backend.dto.request.*;
 import com.authcenter.auth_backend.dto.response.ApiResponse;
+import com.authcenter.auth_backend.model.Role;
+import com.authcenter.auth_backend.model.Status;
 import com.authcenter.auth_backend.model.User;
+import com.authcenter.auth_backend.model.UserRole;
 import com.authcenter.auth_backend.security.JwtService;
 import com.authcenter.auth_backend.service.*;
-import com.authcenter.auth_backend.util.CookieUtil;
+import com.authcenter.auth_backend.utils.StringGenerator;
+import com.authcenter.auth_backend.utils.CookieUtil;
+import com.authcenter.auth_backend.utils.UrlUtils;
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -23,6 +28,7 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.*;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/auth")
@@ -44,6 +50,8 @@ public class AuthController {
     @Value("${authcenter.cors.allowed-origins}")
     private String[] allowedRedirectOrigins;
 
+    @Value("${authcenter.super.admin.email}")
+    private String superAdminEmail;
 
     public AuthController(
             UserService userService,
@@ -99,7 +107,11 @@ public class AuthController {
         claims.put("id", user.getId().toString());
         claims.put("name", user.getName());
         claims.put("email", user.getEmail());
-        claims.put("role", user.getRole());
+        claims.put("roles", user.getRoles()
+                .stream()
+                .map(UserRole::getRole)
+                .map(Role::name)
+                .toList());
         claims.put("application", user.getApplication());
 
         String newAccessToken = jwtService.generateAccessToken(claims, email, jwtAccessExpirationMs);
@@ -117,8 +129,16 @@ public class AuthController {
             accessCookie.setDomain(".madhusudan.space");
         }
 
-
         return ResponseEntity.ok(new ApiResponse<>("Access token refreshed", Map.of("accessToken", newAccessToken), 200));
+    }
+
+    @GetMapping("/roles")
+    public ApiResponse<List<Map<String, String>>> getRoles() {
+        List<Map<String, String>> roles = Arrays.stream(Role.values())
+                .map(role -> Map.of("name", role.name(), "label", role.getDisplayName()))
+                .collect(Collectors.toList());
+
+        return new ApiResponse<>("Roles fetched successfully", roles, 200);
     }
 
     @PostMapping("/login")
@@ -133,51 +153,48 @@ public class AuthController {
                     .body(new ApiResponse<>("Invalid CAPTCHA", null, 403));
         }
 
-        Optional<User> userOpt = userService.findByEmail(req.getEmail());
-        if (userOpt.isEmpty() || !passwordEncoder.matches(req.getPassword(), userOpt.get().getPassword())) {
+    String redirectHost = UrlUtils.extractHost(req.getRedirect());
+    Optional<User> userOpt = userService.findByEmailAndApplication(req.getEmail(), redirectHost);
+
+        if (userOpt.isEmpty()) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(new ApiResponse<>("User not found", null, 404));
+        }
+
+        User user = userOpt.get();
+        if (userOpt.isEmpty() || !passwordEncoder.matches(req.getPassword(), user.getPassword())) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body(new ApiResponse<>("Invalid email or password", null, 401));
         }
 
-        User user = userOpt.get();
-
-        if (!Objects.equals(userOpt.get().getApplication(), user.getApplication())) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body(new ApiResponse<>("User not registered to this application", null, 401));
-        }
-
-        if (!user.isApproved()) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                    .body(new ApiResponse<>("Account not approved yet", null, 403));
-        }
-
-        // If MFA is NOT enabled → QR setup first
-        if (!user.isMfaEnabled()) {
-            return ResponseEntity.ok(
-                    new ApiResponse<>(
-                            "MFA setup required",
-                            Map.of(
-                                    "mfaRequired", true,
-                                    "redirect", "http://authcenter.madhusudan.space:5000/mfa/setup?userId=" + user.getId()
-                                            + "&redirect=" + URLEncoder.encode(req.getRedirect(), StandardCharsets.UTF_8)
-                            ),
-                            200
-                    )
-            );
-        }
-
-        // If MFA already enabled → go to OTP verification page
+    // If MFA is NOT enabled → setup page
+    if (!user.isMfaEnabled()) {
         return ResponseEntity.ok(
-                new ApiResponse<>(
-                        "MFA verification required",
-                        Map.of(
-                                "mfaRequired", true,
-                                "redirect", "http://authcenter.madhusudan.space:5000/mfa/verify-page?userId=" + user.getId()
-                                        + "&redirect=" + URLEncoder.encode(req.getRedirect(), StandardCharsets.UTF_8)
-                        ),
-                        200
-                )
+            new ApiResponse<>(
+                "MFA setup required",
+                Map.of(
+                    "mfaRequired", true,
+                    "redirect", "http://authcenter.madhusudan.space:5000/mfa/setup?userId=" + user.getId()
+                        + "&redirect=" + URLEncoder.encode(req.getRedirect(), StandardCharsets.UTF_8)
+                ),
+                200
+            )
         );
+    }
+
+    // If MFA enabled → verification page
+    // After MFA, cookies are set in MFA controller, not here
+    return ResponseEntity.ok(
+        new ApiResponse<>(
+            "MFA verification required",
+            Map.of(
+                "mfaRequired", true,
+                "redirect", "http://authcenter.madhusudan.space:5000/mfa/verify-page?userId=" + user.getId()
+                    + "&redirect=" + URLEncoder.encode(req.getRedirect(), StandardCharsets.UTF_8)
+            ),
+            200
+        )
+    );
     }
 
     @PostMapping("/otp")
@@ -208,46 +225,87 @@ public class AuthController {
                     .body(new ApiResponse<>("Invalid CAPTCHA", null, 403));
         }
 
-        if (!otpService.validateOtp(req.getEmail(), req.getOtp())) {
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                    .body(new ApiResponse<>("Invalid or expired OTP", null, 400));
-        }
-
-        if (userService.existsByEmail(req.getEmail())) {
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                    .body(new ApiResponse<>("User already exists", null, 400));
-        }
-
-        User user = new User();
-        user.setEmail(req.getEmail());
-        user.setRole(req.getRole());
-        user.setPassword(passwordEncoder.encode(req.getPassword()));
-        user.setName(req.getEmail().split("@")[0]);
-
-        String tempRedirectHost;
+        Role roleEnum;
         try {
-            URI redirectUri = new URI(req.getRedirect());
-            tempRedirectHost = redirectUri.getHost();
-        } catch (URISyntaxException e) {
-            tempRedirectHost = req.getRedirect();
+            roleEnum = Role.valueOf(req.getRole().toUpperCase());
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(new ApiResponse<>("Invalid role", null, 400));
         }
 
-        final String redirectHost = tempRedirectHost;
-
-        user.setApplication(redirectHost);
-
-        user.setApproved(req.getRole().equalsIgnoreCase("user"));
-
-        userService.save(user);
-
-        if (req.getRole().equalsIgnoreCase("user")) {
-            emailService.sendRegistrationSuccess(req.getEmail(), redirectHost );
+        // Approve users automatically, reject others
+        String approvalString = null;
+        Status status;
+        if (roleEnum == Role.USER) {
+            status = Status.APPROVED;
         } else {
-            userService.triggerAdminApproval(user);
+            status = Status.PENDING;
+            approvalString = StringGenerator.generateRandomString(16);
+        }
+
+        String redirectHost = UrlUtils.extractHost(req.getRedirect());
+
+        Optional<User> existingUserOpt = userService.findByEmailAndApplication(req.getEmail(), redirectHost);
+        User user;
+
+        if (existingUserOpt.isPresent()) {
+            user = existingUserOpt.get();
+            boolean hasRole = user.getRoles().stream()
+                    .anyMatch(r -> r.getRole() == roleEnum);
+
+            if (hasRole) {
+                return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                        .body(new ApiResponse<>("User already exists with this role in the application", null, 400));
+            }
+
+            if (!passwordEncoder.matches(req.getPassword(), user.getPassword())) {
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                        .body(new ApiResponse<>("Invalid email or password", null, 401));
+            }
+
+            user.setPassword(passwordEncoder.encode(req.getPassword()));
+            user.addRole(roleEnum, approvalString, status);
+
+        } else {
+            user = new User();
+            user.setEmail(req.getEmail());
+            user.setPassword(passwordEncoder.encode(req.getPassword()));
+            user.setName(req.getEmail().split("@")[0]);
+            user.setApplication(redirectHost);
+            user.addRole(roleEnum, approvalString, status);
+        }
+
+        user = userService.save(user);
+
+        if (roleEnum == Role.USER) {
+            emailService.sendRegistrationSuccess(req.getEmail(), redirectHost);
+        } else {
+            emailService.sendApprovalRequest(
+                    superAdminEmail,
+                    user.getId().toString(),
+                    approvalString,
+                    user.getEmail(),
+                    roleEnum
+            );
         }
 
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(new ApiResponse<>("Registration successful", null, 201));
+    }
+
+    @PostMapping("/user-exists")
+    public ResponseEntity<ApiResponse<Boolean>> checkUserExists(@RequestBody UserExistsRequest req) {
+        String redirectHost = UrlUtils.extractHost(req.getRedirect());
+        Boolean existingUserOpt = userService.existsByEmailAndApplication(req.getEmail(), redirectHost);
+
+        if(existingUserOpt){
+            return ResponseEntity.ok(
+                    new ApiResponse<>("User already exists with one of role in the application", existingUserOpt, 200)
+            );
+        }
+        return ResponseEntity.ok(
+                new ApiResponse<>("User is new to the application", existingUserOpt, 200)
+        );
     }
 
     @PostMapping("/forgot-password")
@@ -262,7 +320,15 @@ public class AuthController {
                     .body(new ApiResponse<>("Invalid or expired OTP", null, 400));
         }
 
-        Optional<User> userOpt = userService.findByEmail(req.getEmail());
+        String redirectHost = null;
+        try {
+            URI redirectUri = new URI(req.getRedirect());
+            redirectHost = redirectUri.getHost();
+        } catch (URISyntaxException e) {
+            redirectHost = req.getRedirect();
+        }
+
+        Optional<User> userOpt = userService.findByEmailAndApplication(req.getEmail(), redirectHost);
         if (userOpt.isEmpty()) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND)
                     .body(new ApiResponse<>("User not found", null, 404));
@@ -272,14 +338,6 @@ public class AuthController {
         user.setPassword(passwordEncoder.encode(req.getNewPassword()));
         userService.save(user);
 
-        String redirectHost = null;
-        try {
-            URI redirectUri = new URI(req.getRedirect());
-            redirectHost = redirectUri.getHost();
-        } catch (URISyntaxException e) {
-            redirectHost = req.getRedirect();
-        }
-
         emailService.sendPasswordResetSuccess(req.getEmail(), redirectHost );
 
         return ResponseEntity.ok(new ApiResponse<>("Password reset successful", null, 200));
@@ -287,22 +345,43 @@ public class AuthController {
 
     @PostMapping("/logout")
     public ResponseEntity<?> logout(HttpServletResponse response, HttpServletRequest request) {
-        // remove access token
+        // Remove cookies for the correct domain (per-app)
+        String cookieDomain = null;
+        String referer = request.getHeader("Referer");
+        if (referer != null) {
+            try {
+                URI refererUri = new URI(referer);
+                String host = refererUri.getHost();
+                if (host != null) {
+                    cookieDomain = "." + host;
+                }
+            } catch (Exception ignored) {}
+        }
+        if (cookieDomain == null) {
+            String reqHost = request.getServerName();
+            if (reqHost != null) {
+                cookieDomain = "." + reqHost;
+            } else {
+                cookieDomain = ".madhusudan.space";
+            }
+        }
+
+        // Remove access token
         Cookie accessCookie = new Cookie("auth_token", null);
         accessCookie.setMaxAge(0);
         accessCookie.setHttpOnly(true);
         accessCookie.setSecure(request.isSecure());
         accessCookie.setPath("/");
-        accessCookie.setDomain("madhusudan.space");
+        accessCookie.setDomain(cookieDomain);
         response.addCookie(accessCookie);
 
-        // remove refresh token
+        // Remove refresh token
         Cookie refreshCookie = new Cookie("refresh_token", null);
         refreshCookie.setMaxAge(0);
         refreshCookie.setHttpOnly(true);
         refreshCookie.setSecure(request.isSecure());
         refreshCookie.setPath("/");
-        refreshCookie.setDomain("madhusudan.space");
+        refreshCookie.setDomain(cookieDomain);
         response.addCookie(refreshCookie);
 
         return ResponseEntity.ok(new ApiResponse<>("Logged out successfully", null, 200));

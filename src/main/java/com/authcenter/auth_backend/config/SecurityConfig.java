@@ -53,11 +53,22 @@ public class SecurityConfig {
         http
                 .cors(cors -> cors.configurationSource(request -> {
                     CorsConfiguration config = new CorsConfiguration();
-                    config.setAllowedOrigins(Arrays.asList(allowedOrigins));
+
+                    List<String> patterns = Arrays.stream(allowedOrigins)
+                            .flatMap(domain -> Arrays.stream(new String[]{
+                                    "http://" + domain,
+                                    "https://" + domain,
+                                    "http://*." + domain + ":*",
+                                    "https://*." + domain + ":*"
+                            }))
+                            .toList();
+
+                    config.setAllowedOriginPatterns(patterns);
                     config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
                     config.setAllowedHeaders(List.of("*"));
                     config.setExposedHeaders(List.of("Set-Cookie", "Authorization", "Location"));
                     config.setAllowCredentials(true);
+
                     return config;
                 }))
                 .csrf(csrf -> csrf.disable())
