@@ -10,6 +10,7 @@ import com.authcenter.auth_backend.service.EmailService;
 import com.authcenter.auth_backend.service.MfaService;
 import com.authcenter.auth_backend.service.OtpService;
 import com.authcenter.auth_backend.utils.CookieUtil;
+import com.authcenter.auth_backend.utils.UrlUtils;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Value;
@@ -147,7 +148,7 @@ public class MfaController {
         String refreshToken = jwtService.generateRefreshToken(user.getEmail(), jwtRefreshExpirationMs);
 
         // Set cookie domain to relying app's subdomain
-        String cookieDomain = host != null ? "." + host : null;
+        String cookieDomain = UrlUtils.extractHost(redirect);
         CookieUtil.addAuthCookies(request, response, accessToken, refreshToken, jwtAccessExpirationMs, jwtRefreshExpirationMs, cookieDomain);
 
         return ResponseEntity.ok(
@@ -226,7 +227,7 @@ public class MfaController {
         String refreshToken = jwtService.generateRefreshToken(user.getEmail(), jwtRefreshExpirationMs);
 
         // Set cookie domain to relying app's subdomain
-        String cookieDomain = host != null ? "." + host : null;
+        String cookieDomain = UrlUtils.extractHost(redirect);
         CookieUtil.addAuthCookies(request, response, accessToken, refreshToken, jwtAccessExpirationMs, jwtRefreshExpirationMs, cookieDomain);
 
         return ResponseEntity.ok(

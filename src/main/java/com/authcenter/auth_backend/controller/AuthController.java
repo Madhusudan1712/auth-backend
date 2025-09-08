@@ -2,10 +2,7 @@ package com.authcenter.auth_backend.controller;
 
 import com.authcenter.auth_backend.dto.request.*;
 import com.authcenter.auth_backend.dto.response.ApiResponse;
-import com.authcenter.auth_backend.model.Role;
-import com.authcenter.auth_backend.model.Status;
-import com.authcenter.auth_backend.model.User;
-import com.authcenter.auth_backend.model.UserRole;
+import com.authcenter.auth_backend.model.*;
 import com.authcenter.auth_backend.security.JwtService;
 import com.authcenter.auth_backend.service.*;
 import com.authcenter.auth_backend.utils.StringGenerator;
@@ -18,6 +15,7 @@ import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 
@@ -37,6 +35,7 @@ public class AuthController {
     private final UserService userService;
     private final OtpService otpService;
     private final RecaptchaService recaptchaService;
+    private final RefreshTokenService refreshTokenService;
     private final EmailService emailService;
     private final JwtService jwtService;
     private final PasswordEncoder passwordEncoder;
@@ -57,6 +56,7 @@ public class AuthController {
             UserService userService,
             OtpService otpService,
             RecaptchaService recaptchaService,
+            RefreshTokenService refreshTokenService,
             EmailService emailService,
             JwtService jwtService,
             PasswordEncoder passwordEncoder
@@ -64,6 +64,7 @@ public class AuthController {
         this.userService = userService;
         this.otpService = otpService;
         this.recaptchaService = recaptchaService;
+        this.refreshTokenService = refreshTokenService;
         this.emailService = emailService;
         this.jwtService = jwtService;
         this.passwordEncoder = passwordEncoder;
@@ -92,17 +93,26 @@ public class AuthController {
         }
 
         String refreshToken = refreshTokenOpt.get();
+
+        // Validate token signature + expiry
         if (!jwtService.validateToken(refreshToken) || jwtService.isTokenExpired(refreshToken)) {
             return ResponseEntity.status(401).body(new ApiResponse<>("Invalid or expired refresh token", null, 401));
         }
 
-        String email = jwtService.extractEmail(refreshToken);
-        Optional<User> userOpt = userService.findByEmail(email);
-        if (userOpt.isEmpty()) {
-            return ResponseEntity.status(404).body(new ApiResponse<>("User not found", null, 404));
+        // Check DB for refresh token
+        Optional<RefreshToken> storedToken = refreshTokenService.findByToken(refreshToken);
+        if (storedToken.isEmpty()) {
+            return ResponseEntity.status(401).body(new ApiResponse<>("Refresh token not found", null, 401));
         }
 
-        User user = userOpt.get();
+        // Rotate token: delete old + issue new one
+        refreshTokenService.delete(storedToken.get());
+
+        String email = jwtService.extractEmail(refreshToken);
+        User user = userService.findByEmail(email)
+                .orElseThrow(() -> new UsernameNotFoundException("User not found"));
+
+        // Prepare claims for new access token
         Map<String, Object> claims = new HashMap<>();
         claims.put("id", user.getId().toString());
         claims.put("name", user.getName());
@@ -114,22 +124,35 @@ public class AuthController {
                 .toList());
         claims.put("application", user.getApplication());
 
+        // Generate new tokens
         String newAccessToken = jwtService.generateAccessToken(claims, email, jwtAccessExpirationMs);
+        String newRefreshToken = jwtService.generateRefreshToken(email, jwtRefreshExpirationMs);
 
-        Cookie accessCookie = new Cookie("auth_token", newAccessToken);
-        accessCookie.setHttpOnly(true);
-        accessCookie.setSecure(false);
-        accessCookie.setPath("/");
-        accessCookie.setMaxAge((int) Duration.ofMillis(jwtAccessExpirationMs).getSeconds());
-        response.addCookie(accessCookie);
+        // Save new refresh token in DB
+        refreshTokenService.save(newRefreshToken, user.getId(), jwtRefreshExpirationMs);
 
-        String requestDomain = request.getServerName();
+        //get domain or subdomain
+        String referer = request.getHeader("Referer");
+        String cookieDomain = (referer != null && !referer.isBlank())
+                ? UrlUtils.extractHost(referer)
+                : request.getServerName();
 
-        if (!requestDomain.equalsIgnoreCase("localhost") && requestDomain.endsWith("madhusudan.space")) {
-            accessCookie.setDomain(".madhusudan.space");
-        }
+        // Update cookies
+        CookieUtil.addAuthCookies(
+                request,
+                response,
+                newAccessToken,
+                newRefreshToken,
+                jwtAccessExpirationMs,
+                jwtRefreshExpirationMs,
+                cookieDomain
+        );
 
-        return ResponseEntity.ok(new ApiResponse<>("Access token refreshed", Map.of("accessToken", newAccessToken), 200));
+        return ResponseEntity.ok(new ApiResponse<>(
+                "Access token refreshed",
+                Map.of("accessToken", newAccessToken),
+                200
+        ));
     }
 
     @GetMapping("/roles")
@@ -220,11 +243,13 @@ public class AuthController {
 
     @PostMapping("/signup")
     public ResponseEntity<?> signup(@Valid @RequestBody SignupRequest req) {
+        // 1. Validate CAPTCHA
         if (!recaptchaService.isCaptchaValid(req.getCaptchaToken())) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN)
                     .body(new ApiResponse<>("Invalid CAPTCHA", null, 403));
         }
 
+        // 2. Validate Role
         Role roleEnum;
         try {
             roleEnum = Role.valueOf(req.getRole().toUpperCase());
@@ -233,50 +258,88 @@ public class AuthController {
                     .body(new ApiResponse<>("Invalid role", null, 400));
         }
 
-        // Approve users automatically, reject others
+        // 3. Determine approval status
         String approvalString = null;
-        Status status;
-        if (roleEnum == Role.USER) {
-            status = Status.APPROVED;
-        } else {
-            status = Status.PENDING;
+        Status status = (roleEnum == Role.USER) ? Status.APPROVED : Status.PENDING;
+        if (status == Status.PENDING) {
             approvalString = StringGenerator.generateRandomString(16);
         }
 
+        // 4. Extract application host
         String redirectHost = UrlUtils.extractHost(req.getRedirect());
 
+        // 5. Check if user already exists
         Optional<User> existingUserOpt = userService.findByEmailAndApplication(req.getEmail(), redirectHost);
         User user;
 
         if (existingUserOpt.isPresent()) {
             user = existingUserOpt.get();
-            boolean hasRole = user.getRoles().stream()
-                    .anyMatch(r -> r.getRole() == roleEnum);
 
-            if (hasRole) {
-                return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                        .body(new ApiResponse<>("User already exists with this role in the application", null, 400));
+            // 5.1 Check if role already exists for the user
+            Optional<UserRole> userRoleOpt = user.getRoles().stream()
+                    .filter(r -> r.getRole() == roleEnum)
+                    .findFirst();
+
+            if (userRoleOpt.isPresent()) {
+                UserRole userRole = userRoleOpt.get();
+
+                // Case 1: Role exists but pending approval
+                if (userRole.isApproved() && !userRole.isRejected()) {
+                    return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                            .body(new ApiResponse<>(
+                                    String.format("User account exists with the role: %s", roleEnum.name() + ", in " + redirectHost),
+                                    null,
+                                    400
+                            ));
+                }
+
+                // Case 2: Role exists but pending approval
+                if (!userRole.isApproved() && !userRole.isRejected()) {
+                    return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                            .body(new ApiResponse<>(
+                                    String.format("User account exists, but not yet approved for role: %s", roleEnum.name()),
+                                    null,
+                                    400
+                            ));
+                }
+
+                // Case 3: Role exists but rejected by super admin
+                if (!userRole.isApproved() && userRole.isRejected()) {
+                    return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                            .body(new ApiResponse<>(
+                                    String.format("User account exists, but rejected by super admin for role: %s", roleEnum.name()),
+                                    null,
+                                    400
+                            ));
+                }
             }
 
+            // 5.2 Validate existing user's password
             if (!passwordEncoder.matches(req.getPassword(), user.getPassword())) {
                 return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                         .body(new ApiResponse<>("Invalid email or password", null, 401));
             }
 
-            user.setPassword(passwordEncoder.encode(req.getPassword()));
-            user.addRole(roleEnum, approvalString, status);
+            // 5.3 Add new role
 
         } else {
+            // 6. Create a new user if not exists
+            if (!otpService.validateOtp(req.getEmail(), req.getOtp())) {
+                return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                        .body(new ApiResponse<>("Invalid or expired OTP", null, 400));
+            }
+
             user = new User();
             user.setEmail(req.getEmail());
             user.setPassword(passwordEncoder.encode(req.getPassword()));
             user.setName(req.getEmail().split("@")[0]);
             user.setApplication(redirectHost);
-            user.addRole(roleEnum, approvalString, status);
-        }
+        } user.addRole(roleEnum, approvalString, status);
 
+        // 7. Save user
         user = userService.save(user);
 
+        // 8. Send appropriate email
         if (roleEnum == Role.USER) {
             emailService.sendRegistrationSuccess(req.getEmail(), redirectHost);
         } else {
@@ -289,6 +352,7 @@ public class AuthController {
             );
         }
 
+        // 9. Return success response
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(new ApiResponse<>("Registration successful", null, 201));
     }
@@ -344,45 +408,20 @@ public class AuthController {
     }
 
     @PostMapping("/logout")
-    public ResponseEntity<?> logout(HttpServletResponse response, HttpServletRequest request) {
-        // Remove cookies for the correct domain (per-app)
+    public ResponseEntity<?> logout(HttpServletRequest request, HttpServletResponse response) {
         String cookieDomain = null;
         String referer = request.getHeader("Referer");
         if (referer != null) {
-            try {
-                URI refererUri = new URI(referer);
-                String host = refererUri.getHost();
-                if (host != null) {
-                    cookieDomain = "." + host;
-                }
-            } catch (Exception ignored) {}
+            cookieDomain = UrlUtils.extractHost(referer);
         }
-        if (cookieDomain == null) {
-            String reqHost = request.getServerName();
-            if (reqHost != null) {
-                cookieDomain = "." + reqHost;
-            } else {
-                cookieDomain = ".madhusudan.space";
-            }
+        if (cookieDomain == null || cookieDomain.isBlank()) {
+            cookieDomain = request.getServerName();
         }
 
-        // Remove access token
-        Cookie accessCookie = new Cookie("auth_token", null);
-        accessCookie.setMaxAge(0);
-        accessCookie.setHttpOnly(true);
-        accessCookie.setSecure(request.isSecure());
-        accessCookie.setPath("/");
-        accessCookie.setDomain(cookieDomain);
-        response.addCookie(accessCookie);
+        boolean isLocal = !request.isSecure()
+                && !"https".equalsIgnoreCase(request.getHeader("X-Forwarded-Proto"));
 
-        // Remove refresh token
-        Cookie refreshCookie = new Cookie("refresh_token", null);
-        refreshCookie.setMaxAge(0);
-        refreshCookie.setHttpOnly(true);
-        refreshCookie.setSecure(request.isSecure());
-        refreshCookie.setPath("/");
-        refreshCookie.setDomain(cookieDomain);
-        response.addCookie(refreshCookie);
+        CookieUtil.clearAuthCookies(request, response, cookieDomain, isLocal);
 
         return ResponseEntity.ok(new ApiResponse<>("Logged out successfully", null, 200));
     }
