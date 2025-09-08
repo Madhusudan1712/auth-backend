@@ -118,7 +118,7 @@ public class ApprovalController {
             }
         }
 
-        emailService.sendApprovedOrRejectedEmail(userOpt.get().getEmail(),userOpt.get().getApplication(), Status.REJECTED, req.getReason());
-        return ResponseEntity.ok(new ApiResponse<>("User rejected and deleted successfully", null, 200));
+        emailService.sendApprovedOrRejectedEmail(userOpt.get().getEmail(), userOpt.get().getApplication(), Status.REJECTED, req.getReason());
+        return ResponseEntity.ok(new ApiResponse<>("User rejected successfully", null, 200));
     }
 }

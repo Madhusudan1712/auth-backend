@@ -208,7 +208,13 @@ public class EmailService {
 
     public void sendApprovedOrRejectedEmail(String to, String domain, Status status, String reason) {
         Objects.requireNonNull(to, "Recipient email required");
-        String subject = "Your account has been approved";
+
+        String subject = switch (status) {
+            case APPROVED -> "Your account got approved";
+            case REJECTED -> "Your account got rejected";
+            case PENDING -> "Your account is pending approval";
+            default -> "Your account status has changed";
+        };
 
         String plain = "Dear User," + System.lineSeparator() + System.lineSeparator() +
                 "Your account have been "+ status +" for application " + domain + System.lineSeparator() + System.lineSeparator() +
