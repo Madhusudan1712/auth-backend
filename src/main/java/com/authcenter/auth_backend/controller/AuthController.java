@@ -8,10 +8,14 @@ import com.authcenter.auth_backend.service.*;
 import com.authcenter.auth_backend.utils.StringGenerator;
 import com.authcenter.auth_backend.utils.CookieUtil;
 import com.authcenter.auth_backend.utils.UrlUtils;
+import com.authcenter.auth_backend.exception.OtpException;
+import com.authcenter.auth_backend.model.OtpPurpose;
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -24,13 +28,13 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
-import java.time.Duration;
 import java.util.*;
 import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/auth")
 public class AuthController {
+    private static final Logger log = LoggerFactory.getLogger(AuthController.class);
 
     private final UserService userService;
     private final OtpService otpService;
@@ -221,28 +225,69 @@ public class AuthController {
     }
 
     @PostMapping("/otp")
-    public ResponseEntity<?> generateOtp(@Valid @RequestBody OtpRequest otpRequest) {
-        if (!recaptchaService.isCaptchaValid(otpRequest.getCaptchaToken())) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                    .body(new ApiResponse<>("Invalid CAPTCHA", null, 403));
-        }
+    public ResponseEntity<ApiResponse<Map<String, String>>> generateOtp(
+            @Valid @RequestBody OtpRequest otpRequest,
+            HttpServletRequest request,
+            HttpServletResponse response
+    ) {
+        log.debug("Received OTP request for email: {}", otpRequest.getEmail());
 
+        // Validate required fields
         if (otpRequest.getEmail() == null || otpRequest.getEmail().trim().isEmpty()) {
             return ResponseEntity.badRequest()
                     .body(new ApiResponse<>("Email is required", null, 400));
         }
 
-        if (otpRequest.getOtpRequiredFor() == null) {
+        if (otpRequest.getOtpPurpose() == null) {
             return ResponseEntity.badRequest()
-                    .body(new ApiResponse<>("Please specify the otp required reason", null, 400));
+                    .body(new ApiResponse<>("OTP purpose is required", null, 400));
         }
 
-        otpService.generateAndSendOtp(otpRequest.getEmail(), otpRequest.getOtpRequiredFor());
-        return ResponseEntity.ok(new ApiResponse<>("OTP sent successfully", null, 200));
+        if (otpRequest.getApplication() == null || otpRequest.getApplication().trim().isEmpty()) {
+            return ResponseEntity.badRequest()
+                    .body(new ApiResponse<>("Application (host domain) is required", null, 400));
+        }
+
+        // Validate reCAPTCHA
+        log.debug("Validating reCAPTCHA token");
+        if (!recaptchaService.isCaptchaValid(otpRequest.getCaptchaToken())) {
+            log.warn("reCAPTCHA verification failed");
+            return ResponseEntity.badRequest()
+                    .body(new ApiResponse<>("reCAPTCHA verification failed", null, 400));
+        }
+
+        try {
+            // Generate and send OTP, get session ID
+            log.debug("Generating OTP for email: {}", otpRequest.getEmail());
+            String sessionId = otpService.generateAndSendOtp(otpRequest);
+
+            // Set session ID in HTTP-only cookie
+            CookieUtil.setOtpSessionCookie(request, response, sessionId, otpRequest.getApplication(), 600); // 600 seconds = 10 minutes
+
+            // Prepare response data
+            Map<String, String> responseData = new HashMap<>();
+            responseData.put("message", "OTP sent successfully");
+            responseData.put("email", otpRequest.getEmail());
+            responseData.put("sessionId", sessionId);
+
+            return ResponseEntity.ok(new ApiResponse<>("OTP sent successfully", responseData, 200));
+
+        } catch (OtpException e) {
+            log.error("OTP generation failed: {}", e.getMessage(), e);
+            return ResponseEntity.status(e.getStatus())
+                    .body(new ApiResponse<>(e.getMessage(), null, e.getStatus().value()));
+        } catch (Exception e) {
+            log.error("Unexpected error during OTP generation: {}", e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(new ApiResponse<>("Failed to generate OTP. Please try again.", null, 500));
+        }
     }
 
     @PostMapping("/signup")
-    public ResponseEntity<?> signup(@Valid @RequestBody SignupRequest req) {
+    public ResponseEntity<?> signup(@Valid @RequestBody SignupRequest req, HttpServletRequest request) {
+        log.info("Received signup request for email: {}", req.getEmail());
+        log.debug("Signup request details: {}", req);
+
         // 1. Validate CAPTCHA
         if (!recaptchaService.isCaptchaValid(req.getCaptchaToken())) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN)
@@ -320,13 +365,35 @@ public class AuthController {
                         .body(new ApiResponse<>("Invalid email or password", null, 401));
             }
 
-            // 5.3 Add new role
+            // 5.3 Validate OTP for existing user adding a new role
+            String sessionId = CookieUtil.getSessionIdFromCookies(request);
+            if (sessionId == null) {
+                return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                        .body(new ApiResponse<>("OTP session not found", null, 400));
+            }
+
+            try {
+                // Validate OTP - will throw OtpException if invalid
+                otpService.validateAndConsumeOtp(sessionId, req.getEmail(), req.getOtp(), OtpPurpose.SIGNUP);
+            } catch (OtpException e) {
+                return ResponseEntity.status(e.getStatus())
+                        .body(new ApiResponse<>(e.getMessage(), null, e.getStatus().value()));
+            }
 
         } else {
             // 6. Create a new user if not exists
-            if (!otpService.validateOtp(req.getEmail(), req.getOtp())) {
+            String sessionId = CookieUtil.getSessionIdFromCookies(request);
+            if (sessionId == null) {
                 return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                        .body(new ApiResponse<>("Invalid or expired OTP", null, 400));
+                        .body(new ApiResponse<>("OTP session not found", null, 400));
+            }
+
+            try {
+                // Validate OTP - will throw OtpException if invalid
+                otpService.validateAndConsumeOtp(sessionId, req.getEmail(), req.getOtp(), OtpPurpose.SIGNUP);
+            } catch (OtpException e) {
+                return ResponseEntity.status(e.getStatus())
+                        .body(new ApiResponse<>(e.getMessage(), null, e.getStatus().value()));
             }
 
             user = new User();
@@ -334,10 +401,14 @@ public class AuthController {
             user.setPassword(passwordEncoder.encode(req.getPassword()));
             user.setName(req.getEmail().split("@")[0]);
             user.setApplication(redirectHost);
-        } user.addRole(roleEnum, approvalString, status);
+        }
+        user.addRole(roleEnum, approvalString, status);
+
+        log.debug("Creating new user with email: {}", req.getEmail());
 
         // 7. Save user
         user = userService.save(user);
+        log.info("User created successfully with ID: {}", user.getId());
 
         // 8. Send appropriate email
         if (roleEnum == Role.USER) {
@@ -373,15 +444,32 @@ public class AuthController {
     }
 
     @PostMapping("/forgot-password")
-    public ResponseEntity<?> resetPassword(@Valid @RequestBody ForgotPasswordRequest req) {
+    public ResponseEntity<?> resetPassword(
+            @Valid @RequestBody ForgotPasswordRequest req,
+            HttpServletRequest request
+    ) {
+        // Validate CAPTCHA
         if (!recaptchaService.isCaptchaValid(req.getCaptchaToken())) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN)
                     .body(new ApiResponse<>("Invalid CAPTCHA", null, 403));
         }
 
-        if (!otpService.validateOtp(req.getEmail(), req.getOtp())) {
+        // Get session ID from cookies
+        String sessionId = CookieUtil.getSessionIdFromCookies(request);
+        if (sessionId == null) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                    .body(new ApiResponse<>("Invalid or expired OTP", null, 400));
+                    .body(new ApiResponse<>("OTP session not found", null, 400));
+        }
+
+        // Validate OTP
+        try {
+            if (!otpService.validateAndConsumeOtp(sessionId, req.getEmail(), req.getOtp(), OtpPurpose.FORGOT_PASSWORD)) {
+                return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                        .body(new ApiResponse<>("Invalid or expired OTP", null, 400));
+            }
+        } catch (OtpException e) {
+            return ResponseEntity.status(e.getStatus())
+                    .body(new ApiResponse<>(e.getMessage(), null, e.getStatus().value()));
         }
 
         String redirectHost = null;

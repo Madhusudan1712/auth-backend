@@ -1,5 +1,6 @@
 package com.authcenter.auth_backend.service;
 
+import com.authcenter.auth_backend.model.OtpPurpose;
 import com.authcenter.auth_backend.model.Role;
 import com.authcenter.auth_backend.model.Status;
 import jakarta.mail.MessagingException;
@@ -64,37 +65,48 @@ public class EmailService {
         }
     }
 
-    public void sendOtpEmail(String to, String otp, String otpRequiredFor) {
+    /**
+     * Sends an OTP email to the specified recipient.
+     * @param to The recipient's email address
+     * @param otp The OTP to send
+     * @param otpPurpose The purpose of the OTP
+     * @param application The application name
+     * @throws MessagingException If there's an error sending the email
+     * @throws UnsupportedEncodingException If there's an encoding error
+     * @throws RuntimeException If any other error occurs
+     */
+    public void sendOtpEmail(String to, String otp, OtpPurpose otpPurpose, String application) 
+            throws MessagingException, UnsupportedEncodingException {
         Objects.requireNonNull(to, "Recipient email required");
+        log.debug("Preparing to send OTP email to: {}", to);
+        
         String subject = "Your AuthCenter OTP";
-
         String plain = "Dear User," + System.lineSeparator() + System.lineSeparator() +
-                "Your requested otp for " + otpRequiredFor + System.lineSeparator() + System.lineSeparator() +
+                "Your requested OTP for " + otpPurpose + " in " + application + " application." + System.lineSeparator() + System.lineSeparator() +
                 "OTP is: " + otp + System.lineSeparator() + System.lineSeparator() +
-                "Note: This OTP valid for 10 minutes ...!" + System.lineSeparator() + System.lineSeparator() +
+                "Note: This OTP is valid for 10 minutes." + System.lineSeparator() + System.lineSeparator() +
                 "This is an auto-generated email. Do not reply to this email." + System.lineSeparator() + System.lineSeparator() +
                 "© " + Year.now().getValue() + " madhusudan.space — This message was sent on behalf of AuthCenter.";
 
+        MimeMessage message = mailSender.createMimeMessage();
+        MimeMessageHelper helper = new MimeMessageHelper(message, false, "UTF-8");
+
+        helper.setFrom(fromAddress, fromName);
+        helper.setTo(to);
+        helper.setSubject(subject);
+        helper.setText(plain); // plain text only
+        helper.setReplyTo(replyTo);
+
+        // Simple delivery-helpful headers
+        message.addHeader("List-Unsubscribe", buildListUnsubscribeHeader());
+        message.addHeader("X-Mailer", "AuthCenter Mailer");
+
         try {
-            MimeMessage message = mailSender.createMimeMessage();
-            MimeMessageHelper helper = new MimeMessageHelper(message, false, "UTF-8");
-
-            helper.setFrom(fromAddress, fromName);
-            helper.setTo(to);
-            helper.setSubject(subject);
-            helper.setText(plain); // plain text only
-            helper.setReplyTo(replyTo);
-
-            // Simple delivery-helpful headers
-            message.addHeader("List-Unsubscribe", buildListUnsubscribeHeader());
-            message.addHeader("X-Mailer", "AuthCenter Mailer");
-
             mailSender.send(message);
-            log.info("OTP email sent to {}", to);
-        } catch (MessagingException | UnsupportedEncodingException ex) {
-            log.error("Failed to send OTP email to {}: {}", to, ex.getMessage(), ex);
-        } catch (Exception ex) {
-            log.error("Unexpected error sending OTP to {}: {}", to, ex.getMessage(), ex);
+            log.info("OTP email sent successfully to: {}", to);
+        } catch (Exception e) {
+            log.error("Failed to send OTP email to: " + to, e);
+            throw e; // Re-throw to allow proper error handling upstream
         }
     }
 

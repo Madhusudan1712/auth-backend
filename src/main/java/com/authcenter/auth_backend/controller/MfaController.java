@@ -1,6 +1,9 @@
 package com.authcenter.auth_backend.controller;
 
+import com.authcenter.auth_backend.dto.request.OtpRequest;
 import com.authcenter.auth_backend.dto.response.ApiResponse;
+import com.authcenter.auth_backend.exception.OtpException;
+import com.authcenter.auth_backend.model.OtpPurpose;
 import com.authcenter.auth_backend.model.Role;
 import com.authcenter.auth_backend.model.User;
 import com.authcenter.auth_backend.model.UserRole;
@@ -9,10 +12,12 @@ import com.authcenter.auth_backend.security.JwtService;
 import com.authcenter.auth_backend.service.EmailService;
 import com.authcenter.auth_backend.service.MfaService;
 import com.authcenter.auth_backend.service.OtpService;
+import com.authcenter.auth_backend.service.RecaptchaService;
 import com.authcenter.auth_backend.utils.CookieUtil;
 import com.authcenter.auth_backend.utils.UrlUtils;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -26,6 +31,7 @@ import java.util.*;
 @RestController
 @RequestMapping("/auth/mfa")
 public class MfaController {
+    private final RecaptchaService recaptchaService;
     private final MfaService mfaService;
     private final UserRepository userRepository;
     private final OtpService otpService;
@@ -41,8 +47,9 @@ public class MfaController {
     @Value("${authcenter.redirect.allowed-uris}")
     private String[] allowedRedirectOrigins;
 
-    public MfaController(MfaService mfaService, UserRepository userRepository,
+    public MfaController(RecaptchaService recaptchaService,MfaService mfaService, UserRepository userRepository,
                          OtpService otpService, EmailService emailService, JwtService jwtService) {
+        this.recaptchaService = recaptchaService;
         this.mfaService = mfaService;
         this.userRepository = userRepository;
         this.otpService = otpService;
@@ -245,17 +252,45 @@ public class MfaController {
     }
 
     @PostMapping("/request-disable")
-    public ResponseEntity<?> requestDisable(@RequestParam String email) {
-        String otp = otpService.issue(email, 10);
-        String otpRequiredFor = "Disable mfa setup";
-        emailService.sendOtpEmail(email, otp, otpRequiredFor); // simple plaintext email
+    public ResponseEntity<?> requestDisable(@Valid @RequestBody OtpRequest otpRequest) {
+        if (!recaptchaService.isCaptchaValid(otpRequest.getCaptchaToken())) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(new ApiResponse<>("Invalid CAPTCHA", null, 403));
+        }
+
+        if (otpRequest.getEmail() == null || otpRequest.getEmail().trim().isEmpty()) {
+            return ResponseEntity.badRequest()
+                    .body(new ApiResponse<>("Email is required", null, 400));
+        }
+
+        if (otpRequest.getOtpPurpose() == null) {
+            return ResponseEntity.badRequest()
+                    .body(new ApiResponse<>("Please specify the otp required reason", null, 400));
+        }
+
+        try {
+            otpService.generateAndSendOtp(otpRequest);
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(new ApiResponse<>("Failed to send OTP. Please try again later.", null, 500));
+        }
+
         return ResponseEntity.ok(new ApiResponse<>("OTP sent to email", null, 200));
     }
 
     @PostMapping("/confirm-disable")
-    public ResponseEntity<?> confirmDisable(@RequestParam String email, @RequestParam String otp) {
-        if (!otpService.consume(email, otp)) {
-            return ResponseEntity.status(403).body(new ApiResponse<>("Invalid or expired OTP", null, 403));
+    public ResponseEntity<?> confirmDisable(@RequestParam String email, @RequestParam String otp, HttpServletRequest request) {
+        String sessionId = CookieUtil.getSessionIdFromCookies(request);
+        if (sessionId == null) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(new ApiResponse<>("OTP session not found", null, 400));
+        }
+        try {
+            // Validate OTP - will throw OtpException if invalid
+            otpService.validateAndConsumeOtp(sessionId, email, otp, OtpPurpose.SIGNUP);
+        } catch (OtpException e) {
+            return ResponseEntity.status(e.getStatus())
+                    .body(new ApiResponse<>(e.getMessage(), null, e.getStatus().value()));
         }
         Optional<User> u = userRepository.findByEmail(email);
         if (u.isEmpty()) return ResponseEntity.status(404).body(new ApiResponse<>("User not found", null, 404));

@@ -1,8 +1,11 @@
 package com.authcenter.auth_backend.dto.request;
 
+import com.authcenter.auth_backend.model.OtpPurpose;
+
 public class OtpRequest {
     private String email;
-    private String otpRequiredFor;
+    private String application;
+    private OtpPurpose otpPurpose;
     private String captchaToken;
 
     public String getEmail() {
@@ -13,12 +16,20 @@ public class OtpRequest {
         this.email = email;
     }
 
-    public String getOtpRequiredFor() {
-        return otpRequiredFor;
+    public String getApplication() {
+        return application;
     }
 
-    public void setOtpRequiredFor(String otpRequiredFor) {
-        this.otpRequiredFor = otpRequiredFor;
+    public void setApplication(String application) {
+        this.application = application;
+    }
+
+    public OtpPurpose getOtpPurpose() {
+        return otpPurpose;
+    }
+
+    public void setOtpPurpose(OtpPurpose otpPurpose) {
+        this.otpPurpose = otpPurpose;
     }
 
     public String getCaptchaToken() {
