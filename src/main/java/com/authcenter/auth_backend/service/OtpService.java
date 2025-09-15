@@ -9,7 +9,6 @@ import java.util.Random;
 import com.authcenter.auth_backend.model.OtpPurpose;
 import com.authcenter.auth_backend.repository.OtpTokenRepository;
 import jakarta.mail.MessagingException;
-import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.commons.codec.binary.Hex;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
@@ -17,16 +16,13 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import java.security.SecureRandom;
-import java.security.spec.KeySpec;
 import javax.crypto.SecretKeyFactory;
 import javax.crypto.spec.PBEKeySpec;
-import org.apache.commons.codec.DecoderException;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.concurrent.TimeUnit;
 
 import com.authcenter.auth_backend.utils.UrlUtils;
 
@@ -60,14 +56,12 @@ public class OtpService {
         this.emailService = emailService;
     }
 
-    /**
-     * Generates and sends an OTP to the user's email.
-     *
-     * @param otpRequest the OTP request containing the user's email, application, and OTP purpose
-     * @return the session ID for the generated OTP
-     */
     private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(OtpService.class);
 
+    /**
+     * Generates and sends an OTP to the user's email.
+     * @return the session ID for the generated OTP
+     */
     public String generateAndSendOtp(OtpRequest otpRequest) {
         String email = otpRequest.getEmail().toLowerCase();
         String application = UrlUtils.extractHost(otpRequest.getApplication());
@@ -104,7 +98,7 @@ public class OtpService {
             logger.debug("Sending OTP email to: {}", email);
             try {
                 emailService.sendOtpEmail(email, otp, otpPurpose, application);
-                logger.info("OTP email sent successfully to: {}", email);
+                logger.info("OTP email sent successfully for existing user, to: {}", email);
             } catch (MessagingException e) {
                 logger.error("Failed to send OTP email to {}: {}", email, e.getMessage(), e);
                 throw new OtpException("Failed to send OTP email. Please try again later.", e);
@@ -140,10 +134,10 @@ public class OtpService {
         try {
             logger.debug("Sending OTP email to: {}", email);
             emailService.sendOtpEmail(email, otp, otpPurpose, application);
-            logger.info("OTP email sent successfully to: {}", email);
+            logger.info("OTP email sent successfully for new user, to: {}", email);
             return sessionId;
         } catch (Exception e) {
-            logger.error("Failed to send OTP email to: " + email, e);
+            logger.error("Failed to send OTP email to: {}", email, e);
             // Clean up the OTP token since email sending failed
             otpTokenRepository.delete(otpToken);
             throw new OtpException("Failed to send OTP email: " + e.getMessage(), HttpStatus.INTERNAL_SERVER_ERROR);
@@ -152,11 +146,6 @@ public class OtpService {
 
     /**
      * Validates and consumes an OTP.
-     *
-     * @param sessionId the session ID for the OTP
-     * @param email the user's email
-     * @param otp the OTP to validate
-     * @param purpose the OTP purpose
      * @return true if the OTP is valid, false otherwise
      */
     public boolean validateAndConsumeOtp(String sessionId, String email, String otp, OtpPurpose purpose) {
@@ -216,12 +205,6 @@ public class OtpService {
     }
 
     /**
-     * Hashes an OTP using a secret key.
-     *
-     * @param otp the OTP to hash
-     * @return the hashed OTP
-     */
-    /**
      * Generates a cryptographically secure random salt.
      * @return a hex-encoded salt string
      */
@@ -233,9 +216,6 @@ public class OtpService {
 
     /**
      * Hashes an OTP with a salt using PBKDF2 with HMAC-SHA256.
-     *
-     * @param otp the OTP to hash
-     * @param salt the salt to use for hashing
      * @return the hashed OTP
      */
     private String hashOtp(String otp, String salt) {

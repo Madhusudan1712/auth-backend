@@ -2,13 +2,17 @@ package com.authcenter.auth_backend.controller;
 
 import com.authcenter.auth_backend.dto.request.ApproveRejectRequest;
 import com.authcenter.auth_backend.dto.response.ApiResponse;
+import com.authcenter.auth_backend.dto.response.ApprovalRequestsResponse;
 import com.authcenter.auth_backend.model.Status;
 import com.authcenter.auth_backend.model.User;
 import com.authcenter.auth_backend.model.UserRole;
 import com.authcenter.auth_backend.repository.UserRepository;
 import com.authcenter.auth_backend.repository.UserRoleRepository;
+import com.authcenter.auth_backend.service.ApprovalService;
 import com.authcenter.auth_backend.service.EmailService;
 import com.authcenter.auth_backend.service.UserRoleService;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -24,12 +28,23 @@ public class ApprovalController {
     private final UserRoleRepository userRoleRepository;
     private final UserRoleService userRoleService;
     private final EmailService emailService;
+    private final ApprovalService approvalService;
 
-    public ApprovalController(UserRepository userRepository, UserRoleRepository userRoleRepository, UserRoleService userRoleService, EmailService emailService) {
+    public ApprovalController(UserRepository userRepository, UserRoleRepository userRoleRepository, UserRoleService userRoleService, EmailService emailService, ApprovalService approvalService) {
         this.userRepository = userRepository;
         this.userRoleRepository = userRoleRepository;
         this.userRoleService = userRoleService;
         this.emailService = emailService;
+        this.approvalService = approvalService;
+    }
+
+    @GetMapping("/approvals/pending")
+    public ResponseEntity<ApiResponse<ApprovalRequestsResponse>> getApprovalRequests(HttpServletRequest request) {
+        ApprovalRequestsResponse result = approvalService.getApprovalRequests(request);
+        if(result == null) {
+            return ResponseEntity.status(HttpStatus.NO_CONTENT).build();
+        }
+        return ResponseEntity.ok(new ApiResponse<>("Pending approvals", result, 200));
     }
 
     @PostMapping("/approve")
