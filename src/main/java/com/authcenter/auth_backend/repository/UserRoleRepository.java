@@ -12,6 +12,5 @@ import java.util.UUID;
 @Repository
 public interface UserRoleRepository extends JpaRepository<UserRole, UUID> {
     List<UserRole> findAllByUser(User user);
-    Optional<UserRole> findByApprovalString(String approvalString);
     List<UserRole> findByApprovedFalseAndRejectedFalse();
 }

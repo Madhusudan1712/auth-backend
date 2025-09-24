@@ -6,24 +6,56 @@ import com.authcenter.auth_backend.dto.response.PendingUser;
 import com.authcenter.auth_backend.model.Role;
 import com.authcenter.auth_backend.model.User;
 import com.authcenter.auth_backend.model.UserRole;
+import com.authcenter.auth_backend.repository.UserRepository;
 import com.authcenter.auth_backend.repository.UserRoleRepository;
+import com.authcenter.auth_backend.security.JwtService;
 import com.authcenter.auth_backend.service.ApprovalService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 @Service
 public class ApprovalServiceImpl implements ApprovalService {
 
+    @Value("${authcenter.super.admin.email}")
+    private String superAdminEmail;
+
     private final UserRoleRepository userRoleRepository;
+    private final UserRepository userRepository;
+    private final JwtService jwtService;
 
     @Autowired
-    public ApprovalServiceImpl(UserRoleRepository userRoleRepository) {
+    public ApprovalServiceImpl(UserRoleRepository userRoleRepository, 
+                             UserRepository userRepository,
+                             JwtService jwtService) {
         this.userRoleRepository = userRoleRepository;
+        this.userRepository = userRepository;
+        this.jwtService = jwtService;
+    }
+
+    @Override
+    public boolean isSuperAdmin(String token) {
+        if (token == null || !jwtService.validateToken(token)) {
+            return false;
+        }
+
+        String email = jwtService.extractEmail(token);
+        String application = jwtService.extractClaim(token, claims -> (String) claims.get("application"));
+
+        Optional<User> userOpt = userRepository.findByEmailAndApplication(email, application);
+        if (userOpt.isEmpty()) {
+            return false;
+        }
+
+        return email.equals(superAdminEmail) && 
+               ("authcenter.madhusudhan.com".equals(application) || 
+                "authcenter.madhusudan.space".equals(application));
     }
 
     @Override

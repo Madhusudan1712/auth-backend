@@ -4,7 +4,6 @@ public class ApproveRejectRequest {
     private String userId;
     private String reason;
     private String role;
-    private String approvalString;
 
     public String getUserId() {
         return userId;
@@ -28,13 +27,5 @@ public class ApproveRejectRequest {
 
     public void setRole(String role) {
         this.role = role;
-    }
-
-    public String getApprovalString() {
-        return approvalString;
-    }
-
-    public void setApprovalString(String approvalString) {
-        this.approvalString = approvalString;
     }
 }
