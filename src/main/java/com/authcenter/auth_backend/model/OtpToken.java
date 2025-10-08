@@ -103,7 +103,6 @@ public class OtpToken extends BaseEntity {
     
     public void incrementAttempts() {
         this.attempts++;
-        super.preUpdate();
     }
     
     public void setAttempts(int attempts) {
