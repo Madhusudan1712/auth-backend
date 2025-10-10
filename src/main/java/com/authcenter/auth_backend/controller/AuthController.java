@@ -168,6 +168,15 @@ public class AuthController {
         return new ApiResponse<>("Roles fetched successfully", roles, 200);
     }
 
+    @GetMapping("/privileged-access-roles")
+    public ApiResponse<List<Map<String, String>>> getPrivilegedAccessRoles() {
+        List<Map<String, String>> privilegedAccessRoles = Arrays.stream(PrivilegedAccessRole.values())
+                .map(privilegedAccessRole -> Map.of("name", privilegedAccessRole.name(), "label", privilegedAccessRole.getDisplayName()))
+                .collect(Collectors.toList());
+
+        return new ApiResponse<>("Privileged access roles fetched successfully", privilegedAccessRoles, 200);
+    }
+
     @PostMapping("/login")
     public ResponseEntity<?> login(
             @Valid @RequestBody LoginRequest req,
@@ -295,9 +304,9 @@ public class AuthController {
         }
 
         // 2. Validate Role
-        Role roleEnum;
+        Role selectedRole;
         try {
-            roleEnum = Role.valueOf(req.getRole().toUpperCase());
+            selectedRole = Role.valueOf(req.getRole().toUpperCase());
         } catch (IllegalArgumentException e) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                     .body(new ApiResponse<>("Invalid role", null, 400));
@@ -305,7 +314,7 @@ public class AuthController {
 
         // 3. Determine approval status
         String approvalString = null;
-        Status status = (roleEnum == Role.USER) ? Status.APPROVED : Status.PENDING;
+        Status status = (selectedRole == Role.USER) ? Status.APPROVED : Status.PENDING;
         if (status == Status.PENDING) {
             approvalString = StringGenerator.generateRandomString(16);
         }
@@ -322,17 +331,17 @@ public class AuthController {
 
             // 5.1 Check if role already exists for the user
             Optional<UserRole> userRoleOpt = user.getRoles().stream()
-                    .filter(r -> r.getRole() == roleEnum)
+                    .filter(r -> r.getRole() == selectedRole)
                     .findFirst();
 
             if (userRoleOpt.isPresent()) {
                 UserRole userRole = userRoleOpt.get();
 
-                // Case 1: Role exists but pending approval
+                // Case 1: Role exists in application
                 if (userRole.isApproved() && !userRole.isRejected()) {
                     return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                             .body(new ApiResponse<>(
-                                    String.format("User account exists with the role: %s", roleEnum.name() + ", in " + redirectHost),
+                                    String.format("User account exists with the role: %s", selectedRole.name() + ", in " + redirectHost),
                                     null,
                                     400
                             ));
@@ -342,7 +351,7 @@ public class AuthController {
                 if (!userRole.isApproved() && !userRole.isRejected()) {
                     return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                             .body(new ApiResponse<>(
-                                    String.format("User account exists, but not yet approved for role: %s", roleEnum.name()),
+                                    String.format("User account exists, but not yet approved for role: %s", selectedRole.name()),
                                     null,
                                     400
                             ));
@@ -352,7 +361,7 @@ public class AuthController {
                 if (!userRole.isApproved() && userRole.isRejected()) {
                     return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                             .body(new ApiResponse<>(
-                                    String.format("User account exists, but rejected by super admin for role: %s", roleEnum.name()),
+                                    String.format("User account exists, but rejected by super admin for role: %s", selectedRole.name()),
                                     null,
                                     400
                             ));
@@ -402,7 +411,7 @@ public class AuthController {
             user.setName(req.getEmail().split("@")[0]);
             user.setApplication(redirectHost);
         }
-        user.addRole(roleEnum, approvalString, status);
+        user.addRole(selectedRole, approvalString, status);
 
         log.debug("Creating new user with email: {}", req.getEmail());
 
@@ -411,16 +420,24 @@ public class AuthController {
         log.info("User created successfully with ID: {}", user.getId());
 
         // 8. Send appropriate email
-        if (roleEnum == Role.USER) {
+        boolean requiresApproval = false;
+        try {
+            requiresApproval = Arrays.stream(PrivilegedAccessRole.values())
+                    .anyMatch(privilegedRole -> privilegedRole.name().equals(selectedRole.name()));
+        } catch (Exception e) {
+            log.warn("Error checking privileged access role for {}", selectedRole, e);
+        }
+
+        if (!requiresApproval) {
             emailService.sendRegistrationSuccess(req.getEmail(), redirectHost);
         } else {
             emailService.sendApprovalRequest(
                     superAdminEmail,
                     user.getId().toString(),
-                    approvalString,
                     user.getEmail(),
-                    roleEnum
+                    selectedRole
             );
+            emailService.sendPendingApproval(req.getEmail(), selectedRole, redirectHost);
         }
 
         // 9. Return success response

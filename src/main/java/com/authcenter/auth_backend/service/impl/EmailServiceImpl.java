@@ -15,8 +15,6 @@ import org.springframework.stereotype.Service;
 
 import java.io.UnsupportedEncodingException;
 import java.net.URI;
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
 import java.time.Year;
 import java.util.Objects;
 
@@ -103,6 +101,40 @@ public class EmailServiceImpl implements EmailService {
 	}
 
 	@Override
+	public void sendPendingApproval(String to, Role role, String domain){
+		Objects.requireNonNull(to, "Recipient email required");
+		String subject = "Registration pending approval";
+
+		String plain = "Dear User," + System.lineSeparator() + System.lineSeparator() +
+				"Your registration is pending, need super admin approval for role " + role + " ..!" + System.lineSeparator() + System.lineSeparator() +
+				"You will receive another email shortly once your account is reviewed." + System.lineSeparator() + System.lineSeparator() +
+				"This is an auto-generated email. Do not reply to this email." + System.lineSeparator() + System.lineSeparator() +
+				"© " + Year.now().getValue() + " madhusudan.space — This message was sent on behalf of AuthCenter.";
+
+		try {
+			MimeMessage message = mailSender.createMimeMessage();
+			MimeMessageHelper helper = new MimeMessageHelper(message, false, "UTF-8");
+
+			helper.setFrom(fromAddress, fromName);
+			helper.setTo(to);
+			helper.setSubject(subject);
+			helper.setText(plain); // plain text only
+			helper.setReplyTo(replyTo);
+
+			// Simple delivery-helpful headers
+			message.addHeader("List-Unsubscribe", buildListUnsubscribeHeader());
+			message.addHeader("X-Mailer", "AuthCenter Mailer");
+
+			mailSender.send(message);
+			log.info("Pending approval email sent to {}", to);
+		} catch (MessagingException | UnsupportedEncodingException ex) {
+			log.error("Failed to send Pending approval email to {}: {}", to, ex.getMessage(), ex);
+		} catch (Exception ex) {
+			log.error("Unexpected error sending Pending approval to {}: {}", to, ex.getMessage(), ex);
+		}
+	}
+
+	@Override
 	public void sendRegistrationSuccess(String to, String domain){
 		Objects.requireNonNull(to, "Recipient email required");
 		String subject = "Registration success";
@@ -139,7 +171,6 @@ public class EmailServiceImpl implements EmailService {
 	@Override
 	public void sendApprovalRequest(String to,
 									String encryptedUserId,
-									String approvalString,
 									String userEmail,
 									Role role) {
 
@@ -156,20 +187,6 @@ public class EmailServiceImpl implements EmailService {
 		}
 
 		try {
-			// URL encode parameters safely
-			String encodedId = URLEncoder.encode(encryptedUserId == null ? "" : encryptedUserId, StandardCharsets.UTF_8);
-			String encodedApproval = URLEncoder.encode(approvalString == null ? "" : approvalString, StandardCharsets.UTF_8);
-			String encodedRole = URLEncoder.encode(role == null ? "" : role.name(), StandardCharsets.UTF_8);
-
-			// ✅ Include role in the approval link
-			String actionLink = String.format(
-					"%s?userId=%s&approvalString=%s&role=%s",
-					approvalBase,
-					encodedId,
-					encodedApproval,
-					encodedRole
-			);
-
 			// Build plain text email body
 			StringBuilder plain = new StringBuilder();
 			plain.append("Hello Madhusudan,").append(System.lineSeparator()).append(System.lineSeparator());
@@ -178,9 +195,8 @@ public class EmailServiceImpl implements EmailService {
 			plain.append("User ID:\t").append(encryptedUserId).append(System.lineSeparator());
 			plain.append("Email:\t").append(userEmail).append(System.lineSeparator());
 			plain.append("Role:\t").append(role).append(System.lineSeparator());
-			plain.append("Approval code:\t").append(approvalString).append(System.lineSeparator()).append(System.lineSeparator());
 			plain.append("Take action (approve or reject):").append(System.lineSeparator());
-			plain.append(actionLink).append(System.lineSeparator()).append(System.lineSeparator());
+			plain.append(approvalBase).append(System.lineSeparator()).append(System.lineSeparator());
 			plain.append("If you don't have access or believe this is in error, contact ")
 					.append(replyTo).append(".").append(System.lineSeparator()).append(System.lineSeparator());
 			plain.append("© ").append(Year.now().getValue()).append(" madhusudan.space — This message was sent on behalf of AuthCenter.");
