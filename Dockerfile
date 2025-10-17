@@ -10,5 +10,7 @@ FROM eclipse-temurin:21-jre-jammy
 WORKDIR /app
 ENV JAVA_TOOL_OPTIONS="-Djava.net.preferIPv4Stack=true -Djava.net.preferIPv6Addresses=false -Dsun.net.inetaddr.ttl=60 -Dsun.net.inetaddr.negative.ttl=0 -XX:MaxRAMPercentage=75.0"
 COPY --from=build /app/target/*.jar app.jar
+COPY start.sh /app/start.sh
+RUN chmod +x /app/start.sh
 EXPOSE 8080
-ENTRYPOINT ["java", "-jar", "app.jar"]
+ENTRYPOINT ["bash", "/app/start.sh"]
