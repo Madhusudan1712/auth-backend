@@ -41,4 +41,4 @@ if [[ -n "${DB_HOST_DERIVED}" ]]; then
   done
 fi
 
-exec java -jar app.jar
+exec java -Dserver.address=0.0.0.0 -Dserver.port="${PORT:-8080}" -jar app.jar
