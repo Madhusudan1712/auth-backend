@@ -3,6 +3,8 @@ package com.authcenter.auth_backend.config;
 import com.authcenter.auth_backend.repository.UserRepository;
 import com.authcenter.auth_backend.security.JwtAuthenticationFilter;
 import com.authcenter.auth_backend.security.JwtService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Value;
@@ -35,6 +37,7 @@ public class SecurityConfig {
 
     private final JwtService jwtService;
     private final UserRepository userRepository;
+    private static final Logger log = LoggerFactory.getLogger(SecurityConfig.class);
 
     @Value("${authcenter.cors.allowed-origins}")
     private String[] allowedOrigins;
@@ -54,20 +57,15 @@ public class SecurityConfig {
                 .cors(cors -> cors.configurationSource(request -> {
                     CorsConfiguration config = new CorsConfiguration();
 
-                    List<String> patterns = Arrays.stream(allowedOrigins)
-                            .flatMap(domain -> Arrays.stream(new String[]{
-                                    "http://" + domain,
-                                    "https://" + domain,
-                                    "http://*." + domain + ":*",
-                                    "https://*." + domain + ":*"
-                            }))
-                            .toList();
+                    List<String> patterns = buildAllowedOriginPatterns();
+                    log.info("CORS allowed origin patterns: {}", patterns);
 
                     config.setAllowedOriginPatterns(patterns);
                     config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
                     config.setAllowedHeaders(List.of("*"));
                     config.setExposedHeaders(List.of("Set-Cookie", "Authorization", "Location"));
                     config.setAllowCredentials(true);
+                    config.setMaxAge(3600L);
 
                     return config;
                 }))
@@ -163,5 +161,31 @@ public class SecurityConfig {
     @Bean
     public AuthenticationEntryPoint unauthorizedEntryPoint() {
         return new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED);
+    }
+
+    private List<String> buildAllowedOriginPatterns() {
+        List<String> entries = Arrays.stream(allowedOrigins == null ? new String[]{} : allowedOrigins)
+                .filter(domain -> domain != null)
+                .map(String::trim)
+                .filter(domain -> !domain.isEmpty())
+                .toList();
+
+        boolean isProd = activeProfile != null && (activeProfile.contains("prod") || activeProfile.contains("production"));
+        if (!isProd) {
+            entries = new java.util.ArrayList<>(entries);
+            entries.add("localhost");
+            entries.add("127.0.0.1");
+        }
+
+        List<String> patterns = new java.util.ArrayList<>();
+        for (String domain : entries) {
+            String cleaned = domain.replaceFirst("^https?://", "").replaceAll("/+\\z", "");
+            patterns.add("http://" + cleaned);
+            patterns.add("https://" + cleaned);
+            patterns.add("http://*." + cleaned);
+            patterns.add("https://*." + cleaned);
+        }
+
+        return patterns;
     }
 }
