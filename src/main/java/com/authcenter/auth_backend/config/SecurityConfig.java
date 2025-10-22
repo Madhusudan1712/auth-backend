@@ -58,6 +58,15 @@ public class SecurityConfig {
                     CorsConfiguration config = new CorsConfiguration();
 
                     List<String> patterns = buildAllowedOriginPatterns();
+                    //for local
+                    // List<String> patterns = Arrays.stream(allowedOrigins)
+                    //         .flatMap(domain -> Arrays.stream(new String[]{
+                    //                 "http://" + domain,
+                    //                 "https://" + domain,
+                    //                 "http://*." + domain + ":*",
+                    //                 "https://*." + domain + ":*"
+                    //         }))
+                    //         .toList();
                     log.info("CORS allowed origin patterns: {}", patterns);
 
                     config.setAllowedOriginPatterns(patterns);

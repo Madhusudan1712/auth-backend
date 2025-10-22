@@ -56,6 +56,9 @@ public class AuthController {
     @Value("${authcenter.super.admin.email}")
     private String superAdminEmail;
 
+    @Value("${base.frontend.url}")
+    private String baseFrontendUrl;
+
     public AuthController(
             UserService userService,
             OtpService otpService,
@@ -210,7 +213,7 @@ public class AuthController {
                 "MFA setup required",
                 Map.of(
                     "mfaRequired", true,
-                    "redirect", "http://authcenter.madhusudan.space:5000/mfa/setup?userId=" + user.getId()
+                    "redirect", baseFrontendUrl+"/mfa/setup?userId=" + user.getId()
                         + "&redirect=" + URLEncoder.encode(req.getRedirect(), StandardCharsets.UTF_8)
                 ),
                 200
@@ -225,7 +228,7 @@ public class AuthController {
             "MFA verification required",
             Map.of(
                 "mfaRequired", true,
-                "redirect", "http://authcenter.madhusudan.space:5000/mfa/verify-page?userId=" + user.getId()
+                "redirect", baseFrontendUrl+"/mfa/verify-page?userId=" + user.getId()
                     + "&redirect=" + URLEncoder.encode(req.getRedirect(), StandardCharsets.UTF_8)
             ),
             200

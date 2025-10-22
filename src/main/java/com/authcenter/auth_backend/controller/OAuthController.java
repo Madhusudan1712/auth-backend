@@ -37,6 +37,9 @@ public class OAuthController {
     @Value("${authcenter.cors.allowed-origins}")
     private String[] allowedRedirectOrigins;
 
+    @Value("${base.frontend.url}")
+    private String baseFrontendUrl;
+
     public OAuthController(UserRepository userRepository, JwtService jwtService) {
         this.userRepository = userRepository;
         this.jwtService = jwtService;
@@ -92,13 +95,13 @@ public class OAuthController {
         // ✅ MFA check — behaves like /auth/login
         if (!user.isMfaEnabled()) {
             // Force MFA setup
-            String mfaSetupUrl = "http://authcenter.madhusudan.space:5000/mfa/setup?userId=" + user.getId()
+            String mfaSetupUrl = baseFrontendUrl+"/mfa/setup?userId=" + user.getId()
                     + "&redirect=" + URLEncoder.encode(redirect, StandardCharsets.UTF_8);
             response.sendRedirect(mfaSetupUrl);
             return;
         } else {
             // MFA already enabled → redirect to verify page
-            String mfaVerifyUrl = "http://authcenter.madhusudan.space:5000/mfa/verify-page?userId=" + user.getId()
+            String mfaVerifyUrl = baseFrontendUrl+"/mfa/verify-page?userId=" + user.getId()
                     + "&redirect=" + URLEncoder.encode(redirect, StandardCharsets.UTF_8);
             response.sendRedirect(mfaVerifyUrl);
             return;

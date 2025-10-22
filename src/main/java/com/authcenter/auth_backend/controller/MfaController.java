@@ -47,6 +47,9 @@ public class MfaController {
     @Value("${authcenter.redirect.allowed-uris}")
     private String[] allowedRedirectOrigins;
 
+    @Value("${base.frontend.url}")
+    private String baseFrontendUrl;
+
     public MfaController(RecaptchaService recaptchaService,MfaService mfaService, UserRepository userRepository,
                          OtpService otpService, EmailService emailService, JwtService jwtService) {
         this.recaptchaService = recaptchaService;
@@ -62,7 +65,7 @@ public class MfaController {
     public void verifyPage(@RequestParam String redirect, HttpServletResponse resp) throws Exception {
         resp.setStatus(303);
         // push the SPA MFA page (authcenter UI) with the app redirect attached
-        resp.setHeader("Location", "http://authcenter.madhusudan.space:5000/mfa?redirect=" +
+        resp.setHeader("Location", baseFrontendUrl+"/mfa?redirect=" +
                 URLEncoder.encode(redirect==null?"":redirect, StandardCharsets.UTF_8));
     }
 

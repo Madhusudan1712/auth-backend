@@ -4,22 +4,22 @@ spring:
       client:
         registration:
           google:
-            client-id: ${OAUTH_GOOGLE_CLIENT_ID}
-            client-secret: ${OAUTH_GOOGLE_CLIENT_SECRET}
+            client-id: ${OAUTH_GOOGLE_CLIENT_ID:}
+            client-secret: ${OAUTH_GOOGLE_CLIENT_SECRET:}
             scope: openid,profile,email
             redirect-uri: "{baseUrl}/login/oauth2/code/{registrationId}"
             authorization-grant-type: authorization_code
 
           github:
-            client-id: ${OAUTH_GITHUB_CLIENT_ID}
-            client-secret: ${OAUTH_GITHUB_CLIENT_SECRET}
+            client-id: ${OAUTH_GITHUB_CLIENT_ID:}
+            client-secret: ${OAUTH_GITHUB_CLIENT_SECRET:}
             scope: user:email
             redirect-uri: "{baseUrl}/login/oauth2/code/{registrationId}"
             authorization-grant-type: authorization_code
 
           linkedin:
-            client-id: ${OAUTH_LINKEDIN_CLIENT_ID}
-            client-secret: ${OAUTH_LINKEDIN_CLIENT_SECRET}
+            client-id: ${OAUTH_LINKEDIN_CLIENT_ID:}
+            client-secret: ${OAUTH_LINKEDIN_CLIENT_SECRET:}
             scope: r_liteprofile,r_emailaddress
             redirect-uri: "{baseUrl}/login/oauth2/code/{registrationId}"
             provider: linkedin
