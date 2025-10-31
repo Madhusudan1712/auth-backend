@@ -101,6 +101,9 @@ public class SecurityConfig {
                                         customAuthorizationRequestResolver(clientRegistrationRepository)
                                 )
                         )
+                        .redirectionEndpoint(red -> red
+                                .baseUri("/oauth2/callback/*")
+                        )
                         .successHandler((request, response, authentication) -> {
                             // must exist (set by ?redirect= param before OAuth starts)
                             String redirectUri = (String) request.getSession().getAttribute("redirect_uri");
