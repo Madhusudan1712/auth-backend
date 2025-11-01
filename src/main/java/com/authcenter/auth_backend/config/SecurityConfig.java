@@ -1,6 +1,7 @@
 package com.authcenter.auth_backend.config;
 
 import com.authcenter.auth_backend.repository.UserRepository;
+import com.authcenter.auth_backend.security.LinkedInAwareOAuth2UserService;
 import com.authcenter.auth_backend.security.JwtAuthenticationFilter;
 import com.authcenter.auth_backend.security.JwtService;
 import org.slf4j.Logger;
@@ -30,6 +31,7 @@ import org.springframework.util.StringUtils;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.Objects;
 
 @Configuration
 @Profile("!test")
@@ -42,6 +44,9 @@ public class SecurityConfig {
     @Value("${authcenter.cors.allowed-origins}")
     private String[] allowedOrigins;
 
+    @Value("${authcenter.cors.local-extra-origins:}")
+    private String[] localExtraOrigins;
+
     @Value("${spring.profiles.active:}")
     private String activeProfile;
 
@@ -52,21 +57,13 @@ public class SecurityConfig {
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http,
-                                                   ClientRegistrationRepository clientRegistrationRepository) throws Exception {
+                                                   ClientRegistrationRepository clientRegistrationRepository,
+                                                   LinkedInAwareOAuth2UserService linkedInAwareOAuth2UserService) throws Exception {
         http
                 .cors(cors -> cors.configurationSource(request -> {
                     CorsConfiguration config = new CorsConfiguration();
 
                     List<String> patterns = buildAllowedOriginPatterns();
-                    //for local
-                    // List<String> patterns = Arrays.stream(allowedOrigins)
-                    //         .flatMap(domain -> Arrays.stream(new String[]{
-                    //                 "http://" + domain,
-                    //                 "https://" + domain,
-                    //                 "http://*." + domain + ":*",
-                    //                 "https://*." + domain + ":*"
-                    //         }))
-                    //         .toList();
                     log.info("CORS allowed origin patterns: {}", patterns);
 
                     config.setAllowedOriginPatterns(patterns);
@@ -103,6 +100,9 @@ public class SecurityConfig {
                         )
                         .redirectionEndpoint(red -> red
                                 .baseUri("/oauth2/callback/*")
+                        )
+                        .userInfoEndpoint(userInfo -> userInfo
+                                .userService(linkedInAwareOAuth2UserService)
                         )
                         .successHandler((request, response, authentication) -> {
                             // must exist (set by ?redirect= param before OAuth starts)
@@ -179,26 +179,43 @@ public class SecurityConfig {
     }
 
     private List<String> buildAllowedOriginPatterns() {
-        List<String> entries = Arrays.stream(allowedOrigins == null ? new String[]{} : allowedOrigins)
-                .filter(domain -> domain != null)
+        List<String> entries = new java.util.ArrayList<>();
+        // Always include configured origins
+        entries.addAll(Arrays.stream(allowedOrigins == null ? new String[]{} : allowedOrigins)
+                .filter(Objects::nonNull)
                 .map(String::trim)
-                .filter(domain -> !domain.isEmpty())
-                .toList();
+                .filter(s -> !s.isEmpty())
+                .toList());
 
         boolean isProd = activeProfile != null && (activeProfile.contains("prod") || activeProfile.contains("production"));
         if (!isProd) {
-            entries = new java.util.ArrayList<>(entries);
+            // Local conveniences
             entries.add("localhost");
             entries.add("127.0.0.1");
+            entries.addAll(Arrays.stream(localExtraOrigins == null ? new String[]{} : localExtraOrigins)
+                    .filter(Objects::nonNull)
+                    .map(String::trim)
+                    .filter(s -> !s.isEmpty())
+                    .toList());
         }
 
         List<String> patterns = new java.util.ArrayList<>();
         for (String domain : entries) {
             String cleaned = domain.replaceFirst("^https?://", "").replaceAll("/+\\z", "");
+            // Base host (any default port)
             patterns.add("http://" + cleaned);
             patterns.add("https://" + cleaned);
+            // Any subdomain
             patterns.add("http://*." + cleaned);
             patterns.add("https://*." + cleaned);
+
+            // In non-prod
+            if (!isProd) {
+                patterns.add("http://" + cleaned + ":*");
+                patterns.add("https://" + cleaned + ":*");
+                patterns.add("http://*." + cleaned + ":*");
+                patterns.add("https://*." + cleaned + ":*");
+            }
         }
 
         return patterns;
